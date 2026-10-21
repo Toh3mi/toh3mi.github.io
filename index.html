@@ -1,0 +1,965 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Service Reachability Monitor</title>
+<style>
+  :root {
+    --bg:        #07080b;
+    --surface:   #0e1117;
+    --border:    rgba(255, 255, 255, 0.075);
+    --border-hi: rgba(255, 255, 255, 0.16);
+    --text:      #e9edf4;
+    --text-dim:  #8c96a8;
+    --text-faint:#5a6377;
+    --accent:    #5eead4;
+    --up:        #34d399;
+    --up-bg:     rgba(52, 211, 153, 0.12);
+    --up-br:     rgba(52, 211, 153, 0.32);
+    --down:      #fb7185;
+    --down-bg:   rgba(251, 113, 133, 0.12);
+    --down-br:   rgba(251, 113, 133, 0.38);
+    --check:     #fbbf24;
+    --check-bg:  rgba(251, 191, 36, 0.10);
+    --check-br:  rgba(251, 191, 36, 0.30);
+    --radius:    14px;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", "Courier New", monospace;
+    --sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: var(--sans);
+    color: var(--text);
+    background-color: var(--bg);
+    background-image:
+      radial-gradient(1100px 700px at 8% -12%,  rgba(94, 234, 212, 0.10), transparent 62%),
+      radial-gradient(900px  620px at 102% -6%, rgba(129, 140, 248, 0.12), transparent 58%),
+      radial-gradient(700px  700px at 50% 118%, rgba(251, 113, 133, 0.055), transparent 60%);
+    background-attachment: fixed;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* faint dotted grid, fading out below the fold */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-image: radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+    background-size: 22px 22px;
+    -webkit-mask-image: radial-gradient(ellipse 85% 55% at 50% 0%, #000 25%, transparent 78%);
+            mask-image: radial-gradient(ellipse 85% 55% at 50% 0%, #000 25%, transparent 78%);
+  }
+
+  .shell {
+    position: relative;
+    z-index: 1;
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: clamp(22px, 4vw, 52px) clamp(16px, 4vw, 32px) 64px;
+    padding-left:  max(clamp(16px, 4vw, 32px), env(safe-area-inset-left));
+    padding-right: max(clamp(16px, 4vw, 32px), env(safe-area-inset-right));
+    padding-bottom: max(64px, calc(24px + env(safe-area-inset-bottom)));
+  }
+
+  .sticky { position: static; }
+
+  /* ---------------------------------------------------------------- header */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    flex-wrap: wrap;
+    margin-bottom: 26px;
+  }
+
+  .brand { display: flex; align-items: center; gap: 14px; }
+
+  .brand__mark {
+    position: relative;
+    flex: none;
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    background: linear-gradient(145deg, #5eead4, #6366f1 72%);
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 255, 255, 0.14),
+      0 12px 32px -14px rgba(94, 234, 212, 0.75);
+  }
+  .brand__mark::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 11px;
+    height: 11px;
+    margin: -5.5px 0 0 -5.5px;
+    border-radius: 50%;
+    background: #06070a;
+    box-shadow: 0 0 0 3px rgba(6, 7, 10, 0.35);
+  }
+
+  .eyebrow {
+    margin: 0 0 3px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+
+  h1 {
+    margin: 0;
+    font-size: clamp(20px, 3.4vw, 27px);
+    font-weight: 800;
+    letter-spacing: -0.022em;
+    line-height: 1.05;
+  }
+
+  /* --------------------------------------------------------------- button */
+  .btn {
+    appearance: none;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    padding: 10px 16px;
+    border-radius: 10px;
+    font-family: var(--sans);
+    font-size: 13.5px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    color: var(--text);
+    background: rgba(255, 255, 255, 0.055);
+    border: 1px solid var(--border-hi);
+    transition: background 0.2s ease, border-color 0.2s ease, transform 0.12s ease;
+  }
+  .btn:hover { background: rgba(255, 255, 255, 0.10); border-color: rgba(255, 255, 255, 0.24); }
+  .btn:active { transform: translateY(1px); }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .btn[disabled] { cursor: progress; opacity: 0.6; }
+  .btn__icon { display: inline-block; font-size: 14px; line-height: 1; }
+  .btn.is-busy .btn__icon { animation: spin 1.1s linear infinite; }
+
+  /* -------------------------------------------------------------- summary */
+  .summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px 28px;
+    flex-wrap: wrap;
+    padding: 20px 22px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.012));
+    box-shadow: 0 24px 60px -46px rgba(0, 0, 0, 0.9);
+  }
+
+  .summary__count {
+    margin: 0;
+    font-size: clamp(30px, 5vw, 38px);
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .summary__slash { color: var(--text-faint); margin: 0 3px; font-weight: 500; }
+  .summary__unit {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    margin-left: 7px;
+  }
+
+  .summary__state {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    min-height: 20px;
+    margin: 9px 0 0;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    color: var(--text-dim);
+  }
+  .summary__state::before {
+    content: "";
+    flex: none;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 12px currentColor;
+  }
+  .summary__state[data-state="checking"] { color: var(--check); }
+  .summary__state[data-state="up"]       { color: var(--up); }
+  .summary__state[data-state="degraded"] { color: var(--check); }
+  .summary__state[data-state="down"]     { color: var(--down); }
+
+  .summary__side { text-align: right; }
+  .summary__meta {
+    margin: 0;
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.9;
+    color: var(--text-faint);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ------------------------------------------------------------- progress */
+  .progress {
+    position: relative;
+    height: 2px;
+    margin: 14px 2px 22px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.06);
+    overflow: hidden;
+  }
+  .progress > span {
+    display: block;
+    height: 100%;
+    width: 100%;
+    transform: scaleX(0);
+    transform-origin: left center;
+    background: linear-gradient(90deg, var(--accent), #818cf8);
+    transition: transform 0.9s linear;
+  }
+  .progress.is-active > span {
+    transform: scaleX(1);
+    transition: none;
+    background: linear-gradient(90deg, transparent, var(--accent) 45%, transparent);
+    background-size: 220% 100%;
+    animation: sweep 1.3s linear infinite;
+  }
+  @keyframes sweep { from { background-position: 220% 0; } to { background-position: -220% 0; } }
+  @keyframes spin  { to { transform: rotate(360deg); } }
+
+  /* ------------------------------------------------------------ card grid */
+  .grid {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 14px;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+  }
+
+  .card {
+    position: relative;
+    overflow: hidden;
+    padding: 16px 16px 14px 19px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.011));
+    transition: border-color 0.25s ease, transform 0.25s ease, box-shadow 0.25s ease;
+    animation: rise 0.5s cubic-bezier(0.2, 0.7, 0.3, 1) backwards;
+  }
+  .card::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: var(--check);
+    transition: background 0.35s ease;
+  }
+  .card[data-status="up"]::before   { background: var(--up); }
+  .card[data-status="down"]::before { background: var(--down); }
+  .card:hover {
+    border-color: var(--border-hi);
+    transform: translateY(-2px);
+    box-shadow: 0 16px 38px -24px rgba(0, 0, 0, 0.95);
+  }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .card__head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .card__id { min-width: 0; }
+  .card__index {
+    display: block;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    color: var(--text-faint);
+    margin-bottom: 3px;
+  }
+  .card__name {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 650;
+    letter-spacing: -0.012em;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+  }
+
+  .card__url {
+    margin: 11px 0 15px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .card__foot {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 11.5px;
+  }
+  .card__k {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    color: var(--text-faint);
+    margin-right: 7px;
+  }
+  .card__v {
+    display: inline-block;
+    min-width: 58px;
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+  }
+  .card__ago {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--text-faint);
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  /* -------------------------------------------------------------- badges */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    flex: none;
+    min-width: 108px;
+    padding: 5px 10px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    line-height: 1.5;
+    transition: color 0.3s ease, background 0.3s ease, border-color 0.3s ease;
+  }
+  .badge__icon { display: inline-block; font-size: 11px; }
+  .badge[data-status="checking"] { color: var(--check); background: var(--check-bg); border-color: var(--check-br); }
+  .badge[data-status="up"]       { color: var(--up);    background: var(--up-bg);    border-color: var(--up-br); }
+  .badge[data-status="down"]     { color: var(--down);  background: var(--down-bg);  border-color: var(--down-br); }
+  .badge[data-status="checking"] .badge__icon { animation: spin 1.1s linear infinite; }
+
+  /* ------------------------------------------------------- empty state */
+  .empty {
+    grid-column: 1 / -1;
+    padding: 34px 20px;
+    text-align: center;
+    border: 1px dashed var(--border-hi);
+    border-radius: var(--radius);
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+
+  /* ------------------------------------------------------------- footer */
+  .note {
+    margin-top: 26px;
+    padding: 16px 18px;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.022);
+  }
+  .note p {
+    margin: 0;
+    font-size: 12.5px;
+    line-height: 1.65;
+    color: var(--text-dim);
+  }
+  .note strong { color: var(--text); font-weight: 650; }
+  .note code {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    padding: 1px 5px;
+    border-radius: 5px;
+    background: rgba(255, 255, 255, 0.07);
+    color: var(--accent);
+  }
+
+  /* ------------------------------------------------------------ mobile */
+  @media (max-width: 620px) {
+    .shell { padding-top: 0; padding-bottom: max(32px, calc(20px + env(safe-area-inset-bottom))); }
+
+    /* compact sticky header: brand + button, summary, progress */
+    .sticky {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      margin: 0 calc(-1 * max(clamp(16px, 4vw, 32px), env(safe-area-inset-left))) 12px
+              calc(-1 * max(clamp(16px, 4vw, 32px), env(safe-area-inset-right)));
+      padding: calc(8px + env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
+      background: rgba(7, 8, 11, 0.9);
+      -webkit-backdrop-filter: blur(12px);
+              backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .topbar { flex-wrap: nowrap; gap: 10px; margin-bottom: 8px; }
+    .brand { gap: 10px; min-width: 0; }
+    .brand__mark { width: 30px; height: 30px; border-radius: 9px; }
+    .brand__mark::after { width: 8px; height: 8px; margin: -4px 0 0 -4px; }
+    .eyebrow { display: none; }
+    h1 { font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .btn { min-height: 44px; min-width: 44px; padding: 8px 14px; justify-content: center; flex: none; }
+
+    .summary { flex-wrap: nowrap; gap: 12px; padding: 8px 12px; }
+    .summary__count { font-size: 24px; }
+    .summary__unit { font-size: 10px; margin-left: 5px; }
+    .summary__state { margin: 4px 0 0; font-size: 12px; min-height: 0; }
+    .summary__side { flex: none; text-align: right; }
+    .summary__meta { line-height: 1.5; }
+    .summary__meta:first-child { display: none; }
+    .progress { margin: 8px 0 0; }
+
+    .grid { grid-template-columns: 1fr; gap: 8px; }
+    .card { padding: 10px 12px 9px 15px; }
+    .card:hover { transform: none; }
+    .card__index { display: none; }
+    .card__name { font-size: 14.5px; }
+    .card__url { margin: 6px 0 8px; }
+    .badge { min-width: 0; padding: 4px 9px; }
+    .card__v { min-width: 0; }
+    .note { margin-top: 16px; padding: 12px 14px; }
+  }
+
+  @media (max-width: 360px) {
+    .btn > span:last-child { display: none; } /* icon-only button */
+    .btn { padding: 8px 12px; }
+    .summary__side { display: none; }
+  }
+
+  /* landscape phones: no room for a sticky header */
+  @media (max-height: 480px) and (max-width: 900px) {
+    .sticky { position: static; background: none; backdrop-filter: none; -webkit-backdrop-filter: none; border-bottom: 0; }
+  }
+
+  /* huge screens: slightly wider container */
+  @media (min-width: 2000px) {
+    .shell { max-width: 1400px; }
+  }
+
+  /* --------------------------------------------------- reduced motion */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+    }
+    .card:hover { transform: none; }
+    .progress.is-active > span { animation: none; background: var(--accent); opacity: 0.6; }
+  }
+</style>
+</head>
+<body>
+  <main class="shell">
+    <div class="sticky">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand__mark" aria-hidden="true"></span>
+        <div>
+          <p class="eyebrow">browser-side probe</p>
+          <h1>Service Reachability</h1>
+        </div>
+      </div>
+      <button id="checkNow" class="btn" type="button">
+        <span class="btn__icon" aria-hidden="true">&#10227;</span>
+        <span>Check now</span>
+      </button>
+    </header>
+
+    <section class="summary" id="summary" aria-live="polite" aria-atomic="true">
+      <div class="summary__main">
+        <p class="summary__count">
+          <span id="upCount">0</span><span class="summary__slash">/</span><span id="totalCount">0</span><span class="summary__unit">up</span>
+        </p>
+        <p class="summary__state" id="stateBanner" data-state="checking">Starting&hellip;</p>
+      </div>
+      <div class="summary__side" aria-hidden="true">
+        <p class="summary__meta" id="lastCheck">Last check: &mdash;</p>
+        <p class="summary__meta">Next in <span id="countdown">30</span>s</p>
+      </div>
+    </section>
+
+    <div class="progress" id="progress" aria-hidden="true"><span id="progressBar"></span></div>
+    </div>
+
+    <ul class="grid" id="grid"></ul>
+
+    <footer class="note">
+      <p>
+        <strong>How this works.</strong> Every service is probed straight from your browser with a
+        <code>fetch(&hellip;, { mode: "no-cors" })</code> request (an image probe is used as a fallback if
+        <code>fetch</code> is unavailable). Browser CORS rules hide the HTTP status code, so
+        <strong>&ldquo;UP&rdquo; only means the host answered at the network level</strong> &mdash; it does not prove the
+        service itself is healthy. Each probe is capped at ~6&nbsp;seconds; a host that is unreachable, blocked,
+        or offline is reported as DOWN. The list is checked automatically every 30&nbsp;seconds.
+      </p>
+    </footer>
+  </main>
+
+<script>
+/* ===========================================================================
+   SERVICES  —  EDIT THIS LIST
+   ---------------------------------------------------------------------------
+   One object per service:  { name: "Human readable name", url: "https://..." }
+
+     * name : any label you like, shown as the card title.
+     * url  : the full URL that will be probed (http:// or https://).
+
+   To add a service, copy a line and change the two fields. Trailing commas are
+   fine. Nothing else in this file needs to change.
+   =========================================================================== */
+const SERVICES = [
+  // Core
+  { name: "Jira",             url: "https://jira.onecell.ru" },
+  { name: "Keycloak",         url: "https://keycloak.onecell.ru" },
+  { name: "ID (.ru)",         url: "https://id.onecell.ru" },
+  { name: "ID (.ai)",         url: "https://id.onecell.ai" },
+  { name: "Mattermost (.ru)", url: "https://mattermost.onecell.ru" },
+  { name: "Mattermost (.ai)", url: "https://mattermost.onecell.ai" },
+  // Important for work
+  { name: "Meet",             url: "https://meet.onecell.ru" },
+  { name: "Meet auth",        url: "https://auth-meet.onecell.ru" },
+  { name: "Harbor",           url: "https://harbor.onecell.ru" },
+  { name: "Nexus",            url: "https://nexus.onecell.ru" },
+  { name: "Docker registry",  url: "https://docker.onecell.ru" },
+  { name: "Sentry",           url: "https://sentry.onecell.ru" },
+  { name: "Alertmanager",     url: "https://alertmanager.onecell.ru" },
+  { name: "Terraform",        url: "https://terraform.onecell.ru" },
+  { name: "Notion",           url: "https://notion.onecell.ru" },
+  { name: "Portal",           url: "https://portal.onecell.ru" },
+  { name: "Drive",            url: "https://drive.onecell.ru" },
+  { name: "Cloud (.ai)",      url: "https://cloud.onecell.ai" },
+  { name: "Dashboard (.ai)",  url: "https://dashboard.onecell.ai" },
+  { name: "onecell.ru",       url: "https://onecell.ru" },
+  { name: "onecell.ai",       url: "https://onecell.ai" },
+  { name: "www.onecell.ai",   url: "https://www.onecell.ai" }
+];
+/* ========================================================================= */
+
+(function () {
+  "use strict";
+
+  // --- tunables ------------------------------------------------------------
+  var TIMEOUT_MS = 6000;    // per-service probe timeout
+  var REFRESH_MS = 30000;   // auto-refresh interval
+
+  // --- state ---------------------------------------------------------------
+  var state = {
+    services: Array.isArray(SERVICES) ? SERVICES.slice() : [],
+    results: [],
+    running: false,
+    lastCheckAt: null,
+    nextAt: null,
+    cycleTimer: null,
+    tickTimer: null
+  };
+
+  var cards = [];
+
+  // --- dom refs ------------------------------------------------------------
+  var el = {
+    grid:         document.getElementById("grid"),
+    progress:     document.getElementById("progress"),
+    progressBar:  document.getElementById("progressBar"),
+    upCount:      document.getElementById("upCount"),
+    totalCount:   document.getElementById("totalCount"),
+    stateBanner:  document.getElementById("stateBanner"),
+    lastCheck:    document.getElementById("lastCheck"),
+    countdown:    document.getElementById("countdown"),
+    checkNow:     document.getElementById("checkNow")
+  };
+
+  var ICONS  = { checking: "\u27F3", up: "\u2713", down: "\u2715" };
+  var LABELS = { checking: "CHECKING", up: "UP", down: "DOWN" };
+
+  // --- tiny helpers --------------------------------------------------------
+  function now() { return Date.now(); }
+  function elapsed(t) { return Math.max(0, now() - t); }
+
+  function relative(ts) {
+    if (!ts) return "\u2014";
+    var s = Math.max(0, Math.round((now() - ts) / 1000));
+    if (s < 1)  return "checked just now";
+    if (s < 60) return "checked " + s + "s ago";
+    var m = Math.floor(s / 60);
+    return "checked " + m + "m " + (s % 60) + "s ago";
+  }
+
+  // --- build the cards once (no DOM churn on later updates) ----------------
+  function buildCards() {
+    el.grid.textContent = "";
+    cards = [];
+    state.results = state.services.map(function () {
+      return { status: "checking", latency: null, checkedAt: null, reason: null };
+    });
+
+    if (state.services.length === 0) {
+      var empty = document.createElement("li");
+      empty.className = "empty";
+      empty.textContent = "No services configured \u2014 add entries to the SERVICES array.";
+      el.grid.appendChild(empty);
+      return;
+    }
+
+    state.services.forEach(function (svc, i) {
+      var li = document.createElement("li");
+      li.className = "card";
+      li.dataset.status = "checking";
+      li.style.animationDelay = (i * 60) + "ms";
+
+      var head = document.createElement("div");
+      head.className = "card__head";
+
+      var id = document.createElement("div");
+      id.className = "card__id";
+
+      var index = document.createElement("span");
+      index.className = "card__index";
+      index.textContent = String(i + 1).padStart(2, "0");
+
+      var name = document.createElement("h2");
+      name.className = "card__name";
+      name.textContent = svc.name;
+
+      id.appendChild(index);
+      id.appendChild(name);
+
+      var badge = document.createElement("span");
+      badge.className = "badge";
+      badge.dataset.status = "checking";
+
+      var icon = document.createElement("span");
+      icon.className = "badge__icon";
+      icon.setAttribute("aria-hidden", "true");
+      icon.textContent = ICONS.checking;
+
+      var label = document.createElement("span");
+      label.className = "badge__label";
+      label.textContent = LABELS.checking;
+
+      badge.appendChild(icon);
+      badge.appendChild(label);
+      head.appendChild(id);
+      head.appendChild(badge);
+
+      var url = document.createElement("p");
+      url.className = "card__url";
+      url.textContent = svc.url;
+      url.title = svc.url;
+
+      var foot = document.createElement("div");
+      foot.className = "card__foot";
+
+      var lat = document.createElement("span");
+      lat.className = "card__latency";
+      var latK = document.createElement("span");
+      latK.className = "card__k";
+      latK.textContent = "latency";
+      var latV = document.createElement("span");
+      latV.className = "card__v";
+      latV.textContent = "\u2014";
+      lat.appendChild(latK);
+      lat.appendChild(latV);
+
+      var ago = document.createElement("span");
+      ago.className = "card__ago";
+      ago.textContent = "probing\u2026";
+
+      foot.appendChild(lat);
+      foot.appendChild(ago);
+
+      li.appendChild(head);
+      li.appendChild(url);
+      li.appendChild(foot);
+      el.grid.appendChild(li);
+
+      cards.push({ root: li, badge: badge, icon: icon, label: label, latV: latV, ago: ago });
+    });
+  }
+
+  // --- painting ------------------------------------------------------------
+  function paint(i) {
+    var c = cards[i];
+    var r = state.results[i];
+    if (!c || !r) return;
+    var st = (r.status === "up" || r.status === "down") ? r.status : "checking";
+
+    c.root.dataset.status = st;
+    c.badge.dataset.status = st;
+    c.icon.textContent = ICONS[st];
+    c.label.textContent = LABELS[st];
+    c.latV.textContent = (typeof r.latency === "number") ? r.latency + " ms" : "\u2014";
+    c.ago.textContent = (st === "checking") ? "probing\u2026" : relative(r.checkedAt);
+  }
+
+  function paintAgo(i) {
+    var c = cards[i];
+    var r = state.results[i];
+    if (!c || !r || r.status === "checking") return;
+    c.ago.textContent = relative(r.checkedAt);
+  }
+
+  function paintSummary() {
+    var total = state.services.length;
+    var up = 0, down = 0, checking = 0;
+    state.results.forEach(function (r) {
+      if (r.status === "up") up++;
+      else if (r.status === "down") down++;
+      else checking++;
+    });
+
+    el.upCount.textContent = String(up);
+    el.totalCount.textContent = String(total);
+
+    var name, text;
+    if (total === 0) {
+      name = "checking"; text = "No services configured";
+    } else if (checking > 0) {
+      name = "checking"; text = "Checking services\u2026";
+    } else if (down === 0) {
+      name = "up"; text = "All services reachable";
+    } else if (up === 0) {
+      name = "down"; text = "All services unreachable";
+    } else {
+      name = "degraded"; text = "Degraded \u2014 " + down + " unreachable";
+    }
+
+    el.stateBanner.dataset.state = name;
+    el.stateBanner.textContent = text;
+  }
+
+  function paintLastCheck() {
+    if (!state.lastCheckAt) { el.lastCheck.textContent = "Last check: \u2014"; return; }
+    el.lastCheck.textContent = "Last check: " + relative(state.lastCheckAt).replace("checked ", "");
+  }
+
+  // --- timeout plumbing ----------------------------------------------------
+  // Primary: AbortController + setTimeout (broadest support).
+  // Fallback: feature-detect AbortSignal.timeout() when AbortController is absent.
+  function createTimeout() {
+    if (typeof AbortController === "function") {
+      var controller = new AbortController();
+      var id = setTimeout(function () {
+        try { controller.abort(); } catch (e) { /* ignore */ }
+      }, TIMEOUT_MS);
+      return { signal: controller.signal, cancel: function () { clearTimeout(id); } };
+    }
+    if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+      try {
+        return { signal: AbortSignal.timeout(TIMEOUT_MS), cancel: function () {} };
+      } catch (e) { /* ignore */ }
+    }
+    return { signal: undefined, cancel: function () {} };
+  }
+
+  // --- image fallback probe ------------------------------------------------
+  function probeWithImage(service, startedAt) {
+    return new Promise(function (resolve) {
+      if (typeof Image !== "function") {
+        resolve({ status: "down", latency: elapsed(startedAt), reason: "no-probe-method" });
+        return;
+      }
+      var settled = false;
+      var timer = null;
+      var img = new Image();
+
+      function done(status, reason) {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        img.onload = null;
+        img.onerror = null;
+        resolve({ status: status, latency: elapsed(startedAt), reason: reason });
+      }
+
+      timer = setTimeout(function () { done("down", "timeout"); }, TIMEOUT_MS);
+      img.onload  = function () { done("up", "img-load"); };
+      img.onerror = function () { done("down", "img-error"); };
+
+      var sep = service.url.indexOf("?") === -1 ? "?" : "&";
+      img.src = service.url + sep + "_probe=" + now();
+    });
+  }
+
+  // --- primary probe -------------------------------------------------------
+  function probe(service) {
+    var startedAt = now();
+    var t = createTimeout();
+
+    return Promise.resolve()
+      .then(function () {
+        if (typeof fetch !== "function") throw new Error("fetch unsupported");
+        return fetch(service.url, {
+          mode: "no-cors",
+          cache: "no-store",
+          redirect: "follow",
+          signal: t.signal
+        });
+      })
+      .then(function () {
+        t.cancel();
+        return { status: "up", latency: elapsed(startedAt), reason: "fetch-resolved" };
+      })
+      .catch(function (err) {
+        t.cancel();
+        var aborted = !!(err && (err.name === "AbortError" || err.name === "TimeoutError"));
+        if (aborted) {
+          return { status: "down", latency: elapsed(startedAt), reason: "timeout" };
+        }
+        // fetch threw immediately (unsupported / blocked) -> image fallback
+        return probeWithImage(service, startedAt);
+      });
+  }
+
+  // --- one full sweep ------------------------------------------------------
+  function checkAll() {
+    if (state.running) return;
+    state.running = true;
+    clearTimeout(state.cycleTimer);
+
+    if (state.services.length === 0) {
+      state.running = false;
+      paintSummary();
+      return;
+    }
+
+    el.checkNow.disabled = true;
+    el.checkNow.classList.add("is-busy");
+    el.progress.classList.add("is-active");
+    el.progressBar.style.transform = "";
+    el.countdown.textContent = "\u2014";
+
+    // reset every row to CHECKING (same DOM nodes -> zero layout shift)
+    state.results = state.services.map(function () {
+      return { status: "checking", latency: null, checkedAt: null, reason: null };
+    });
+    state.results.forEach(function (_, i) { paint(i); });
+    paintSummary();
+    state.nextAt = null;
+
+    var tasks = state.services.map(function (svc, i) {
+      return probe(svc).then(
+        function (r) { return { i: i, result: r }; },
+        function ()  { return { i: i, result: { status: "down", latency: null, reason: "exception" } }; }
+      );
+    });
+
+    Promise.allSettled(tasks).then(function (settled) {
+      settled.forEach(function (entry, idx) {
+        var payload;
+        if (entry && entry.status === "fulfilled" && entry.value) {
+          payload = entry.value;
+        } else {
+          payload = { i: idx, result: { status: "down", latency: null, reason: "rejected" } };
+        }
+        var i = payload.i;
+        var r = payload.result || {};
+        state.results[i] = {
+          status: (r.status === "up") ? "up" : "down",
+          latency: (typeof r.latency === "number") ? r.latency : null,
+          checkedAt: now(),
+          reason: r.reason || null
+        };
+        paint(i);
+      });
+
+      state.lastCheckAt = now();
+      paintLastCheck();
+      paintSummary();
+
+      state.running = false;
+      el.checkNow.disabled = false;
+      el.checkNow.classList.remove("is-busy");
+      scheduleNext();
+    });
+  }
+
+  function scheduleNext() {
+    clearTimeout(state.cycleTimer);
+    state.nextAt = now() + REFRESH_MS;
+    el.countdown.textContent = String(Math.ceil(REFRESH_MS / 1000));
+    el.progress.classList.remove("is-active");
+    el.progressBar.style.transform = "scaleX(1)";
+    state.cycleTimer = setTimeout(checkAll, REFRESH_MS);
+  }
+
+  // --- 1 Hz ticker: countdown bar + relative timestamps --------------------
+  function tick() {
+    if (state.nextAt && !state.running) {
+      var left = Math.max(0, Math.ceil((state.nextAt - now()) / 1000));
+      el.countdown.textContent = String(left);
+      var p = Math.max(0, Math.min(1, (state.nextAt - now()) / REFRESH_MS));
+      el.progressBar.style.transform = "scaleX(" + p.toFixed(4) + ")";
+    }
+    state.results.forEach(function (_, i) { paintAgo(i); });
+  }
+
+  // --- init ----------------------------------------------------------------
+  function init() {
+    buildCards();
+    el.totalCount.textContent = String(state.services.length);
+    paintSummary();
+    paintLastCheck();
+
+    el.checkNow.addEventListener("click", function () { checkAll(); });
+
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden && state.nextAt && now() > state.nextAt && !state.running) {
+        checkAll();
+      }
+    });
+
+    clearInterval(state.tickTimer);
+    state.tickTimer = setInterval(tick, 1000);
+
+    checkAll();
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
+})();
+</script>
+</body>
+</html>
