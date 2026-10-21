@@ -3,30 +3,59 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="light dark">
 <title>Service Reachability Monitor</title>
 <style>
+  /* palette mirrors onecell.ru: flat black/white surfaces, hairline dividers, one blue accent */
   :root {
-    --bg:        #07080b;
-    --surface:   #0e1117;
-    --border:    rgba(255, 255, 255, 0.075);
-    --border-hi: rgba(255, 255, 255, 0.16);
-    --text:      #e9edf4;
-    --text-dim:  #8c96a8;
-    --text-faint:#5a6377;
-    --accent:    #5eead4;
-    --up:        #34d399;
-    --up-bg:     rgba(52, 211, 153, 0.12);
-    --up-br:     rgba(52, 211, 153, 0.32);
-    --down:      #fb7185;
-    --down-bg:   rgba(251, 113, 133, 0.12);
-    --down-br:   rgba(251, 113, 133, 0.38);
-    --check:     #fbbf24;
-    --check-bg:  rgba(251, 191, 36, 0.10);
-    --check-br:  rgba(251, 191, 36, 0.30);
-    --radius:    14px;
-    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", "Courier New", monospace;
-    --sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --fg:        0 0 0;
+    --bg-rgb:    255 255 255;
+    --bg:        #ffffff;
+    --surface:   #ffffff;
+    --surface-alt: #f8f8f8;
+    --border:    #e9e9e9;
+    --border-hi: #cfcfd4;
+    --text:      #000000;
+    --text-dim:  #6f6f6f;
+    --text-faint:#8a8a90;
+    --accent:    #1d38e6;
+    --accent-text:#1d38e6;
+    --up:        #0a8a5b;
+    --up-bg:     rgba(10, 138, 91, 0.10);
+    --up-br:     rgba(10, 138, 91, 0.35);
+    --down:      #d92d4b;
+    --down-bg:   rgba(217, 45, 75, 0.09);
+    --down-br:   rgba(217, 45, 75, 0.38);
+    --check:     #a86400;
+    --check-bg:  rgba(168, 100, 0, 0.09);
+    --check-br:  rgba(168, 100, 0, 0.35);
+    --radius:    10px;
+    --mono: "GT Pressura Mono VF", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", "Courier New", monospace;
+    --sans: "GT Pressura VF", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fg:        255 255 255;
+      --bg-rgb:    15 15 16;
+      --bg:        #0f0f10;
+      --surface:   #0f0f10;
+      --surface-alt: #19191a;
+      --border:    #2e2e2e;
+      --border-hi: #46464c;
+      --text:      #ffffff;
+      --text-dim:  #b0b0b8;
+      --text-faint:#80808a;
+      --accent-text:#8795ff;
+      --up:        #34d399;
+      --up-bg:     rgba(52, 211, 153, 0.12);
+      --up-br:     rgba(52, 211, 153, 0.32);
+      --down:      #fb7185;
+      --down-bg:   rgba(251, 113, 133, 0.12);
+      --down-br:   rgba(251, 113, 133, 0.38);
+      --check:     #fbbf24;
+      --check-bg:  rgba(251, 191, 36, 0.10);
+      --check-br:  rgba(251, 191, 36, 0.30);
+    }
   }
 
   *, *::before, *::after { box-sizing: border-box; }
@@ -39,26 +68,8 @@
     font-family: var(--sans);
     color: var(--text);
     background-color: var(--bg);
-    background-image:
-      radial-gradient(1100px 700px at 8% -12%,  rgba(94, 234, 212, 0.10), transparent 62%),
-      radial-gradient(900px  620px at 102% -6%, rgba(129, 140, 248, 0.12), transparent 58%),
-      radial-gradient(700px  700px at 50% 118%, rgba(251, 113, 133, 0.055), transparent 60%);
-    background-attachment: fixed;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
-  }
-
-  /* faint dotted grid, fading out below the fold */
-  body::before {
-    content: "";
-    position: fixed;
-    inset: 0;
-    z-index: 0;
-    pointer-events: none;
-    background-image: radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px);
-    background-size: 22px 22px;
-    -webkit-mask-image: radial-gradient(ellipse 85% 55% at 50% 0%, #000 25%, transparent 78%);
-            mask-image: radial-gradient(ellipse 85% 55% at 50% 0%, #000 25%, transparent 78%);
   }
 
   .shell {
@@ -92,10 +103,7 @@
     width: 40px;
     height: 40px;
     border-radius: 12px;
-    background: linear-gradient(145deg, #5eead4, #6366f1 72%);
-    box-shadow:
-      inset 0 0 0 1px rgba(255, 255, 255, 0.14),
-      0 12px 32px -14px rgba(94, 234, 212, 0.75);
+    background: var(--accent);
   }
   .brand__mark::after {
     content: "";
@@ -106,8 +114,7 @@
     height: 11px;
     margin: -5.5px 0 0 -5.5px;
     border-radius: 50%;
-    background: #06070a;
-    box-shadow: 0 0 0 3px rgba(6, 7, 10, 0.35);
+    background: #ffffff;
   }
 
   .eyebrow {
@@ -122,7 +129,7 @@
   h1 {
     margin: 0;
     font-size: clamp(20px, 3.4vw, 27px);
-    font-weight: 800;
+    font-weight: 700;
     letter-spacing: -0.022em;
     line-height: 1.05;
   }
@@ -141,16 +148,20 @@
     font-weight: 600;
     letter-spacing: 0.01em;
     color: var(--text);
-    background: rgba(255, 255, 255, 0.055);
+    background: rgb(var(--fg) / 0.055);
     border: 1px solid var(--border-hi);
     transition: background 0.2s ease, border-color 0.2s ease, transform 0.12s ease;
   }
-  .btn:hover { background: rgba(255, 255, 255, 0.10); border-color: rgba(255, 255, 255, 0.24); }
+  .btn:hover { background: rgb(var(--fg) / 0.10); border-color: rgb(var(--fg) / 0.24); }
   .btn:active { transform: translateY(1px); }
-  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .btn:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; }
   .btn[disabled] { cursor: progress; opacity: 0.6; }
   .btn__icon { display: inline-block; font-size: 14px; line-height: 1; }
   .btn.is-busy .btn__icon { animation: spin 1.1s linear infinite; }
+
+  .topbar__actions { display: flex; align-items: center; gap: 8px; flex: none; }
+  .btn.is-ok  { border-color: var(--up-br);   color: var(--up); }
+  .btn.is-bad { border-color: var(--down-br); color: var(--down); }
 
   /* -------------------------------------------------------------- summary */
   .summary {
@@ -162,8 +173,7 @@
     padding: 20px 22px;
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.012));
-    box-shadow: 0 24px 60px -46px rgba(0, 0, 0, 0.9);
+    background: var(--surface-alt);
   }
 
   .summary__count {
@@ -226,7 +236,7 @@
     height: 2px;
     margin: 14px 2px 22px;
     border-radius: 2px;
-    background: rgba(255, 255, 255, 0.06);
+    background: rgb(var(--fg) / 0.06);
     overflow: hidden;
   }
   .progress > span {
@@ -235,7 +245,7 @@
     width: 100%;
     transform: scaleX(0);
     transform-origin: left center;
-    background: linear-gradient(90deg, var(--accent), #818cf8);
+    background: var(--accent);
     transition: transform 0.9s linear;
   }
   .progress.is-active > span {
@@ -264,7 +274,7 @@
     padding: 16px 16px 14px 19px;
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.011));
+    background: var(--surface-alt);
     transition: border-color 0.25s ease, transform 0.25s ease, box-shadow 0.25s ease;
     animation: rise 0.5s cubic-bezier(0.2, 0.7, 0.3, 1) backwards;
   }
@@ -283,7 +293,7 @@
   .card:hover {
     border-color: var(--border-hi);
     transform: translateY(-2px);
-    box-shadow: 0 16px 38px -24px rgba(0, 0, 0, 0.95);
+    box-shadow: none;
   }
   @keyframes rise {
     from { opacity: 0; transform: translateY(10px); }
@@ -391,6 +401,48 @@
     color: var(--text-dim);
   }
 
+  /* -------------------------------------------------------- diagnostics */
+  .diag {
+    margin-top: 22px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: rgb(var(--fg) / 0.022);
+  }
+  .diag > summary {
+    cursor: pointer;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    padding: 0 18px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+  .diag__body { padding: 4px 18px 18px; }
+  .diag h3 {
+    margin: 16px 0 6px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent-text);
+  }
+  .diag dl {
+    margin: 0;
+    display: grid;
+    grid-template-columns: minmax(96px, max-content) 1fr;
+    gap: 4px 14px;
+    font-size: 12px;
+  }
+  .diag dt { color: var(--text-faint); font-family: var(--mono); font-size: 11px; }
+  .diag dd { margin: 0; color: var(--text); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+  .diag dd.bad { color: var(--down); }
+  .diag dd.warn { color: var(--check); }
+  .diag dd.ok { color: var(--up); }
+  .diag .btn { margin-top: 16px; min-height: 44px; }
+
   /* ------------------------------------------------------------- footer */
   .note {
     margin-top: 26px;
@@ -398,7 +450,7 @@
     border: 1px solid var(--border);
     border-left: 3px solid var(--accent);
     border-radius: 10px;
-    background: rgba(255, 255, 255, 0.022);
+    background: rgb(var(--fg) / 0.022);
   }
   .note p {
     margin: 0;
@@ -412,8 +464,8 @@
     font-size: 11.5px;
     padding: 1px 5px;
     border-radius: 5px;
-    background: rgba(255, 255, 255, 0.07);
-    color: var(--accent);
+    background: rgb(var(--fg) / 0.07);
+    color: var(--accent-text);
   }
 
   /* ------------------------------------------------------------ mobile */
@@ -428,18 +480,24 @@
       margin: 0 calc(-1 * max(clamp(16px, 4vw, 32px), env(safe-area-inset-left))) 12px
               calc(-1 * max(clamp(16px, 4vw, 32px), env(safe-area-inset-right)));
       padding: calc(8px + env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
-      background: rgba(7, 8, 11, 0.9);
+      background: rgb(var(--bg-rgb) / 0.92);
       -webkit-backdrop-filter: blur(12px);
               backdrop-filter: blur(12px);
       border-bottom: 1px solid var(--border);
     }
     .topbar { flex-wrap: nowrap; gap: 10px; margin-bottom: 8px; }
-    .brand { gap: 10px; min-width: 0; }
+    .brand { gap: 10px; min-width: 0; flex: 1; }
+    .brand > div { min-width: 0; }
     .brand__mark { width: 30px; height: 30px; border-radius: 9px; }
     .brand__mark::after { width: 8px; height: 8px; margin: -4px 0 0 -4px; }
     .eyebrow { display: none; }
     h1 { font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .btn { min-height: 44px; min-width: 44px; padding: 8px 14px; justify-content: center; flex: none; }
+    .topbar__actions { gap: 6px; }
+    #copyTop { padding: 8px 12px; }
+    #copyTop .btn__label { display: none; }   /* icon-only on phones */
+    #copyTop.is-ok .btn__label, #copyTop.is-bad .btn__label { display: inline; }
+    #copyTop.is-ok .btn__icon, #copyTop.is-bad .btn__icon { display: none; }
 
     .summary { flex-wrap: nowrap; gap: 12px; padding: 8px 12px; }
     .summary__count { font-size: 24px; }
@@ -462,8 +520,8 @@
   }
 
   @media (max-width: 360px) {
-    .btn > span:last-child { display: none; } /* icon-only button */
-    .btn { padding: 8px 12px; }
+    #checkNow > span:last-child { display: none; } /* icon-only button */
+    #checkNow { padding: 8px 12px; }
     .summary__side { display: none; }
   }
 
@@ -500,10 +558,16 @@
           <h1>Service Reachability</h1>
         </div>
       </div>
+      <div class="topbar__actions">
+      <button id="copyTop" class="btn" type="button" title="Copy diagnostics to clipboard" aria-label="Copy diagnostics report">
+        <span class="btn__icon" aria-hidden="true">&#10064;</span>
+        <span class="btn__label">Copy report</span>
+      </button>
       <button id="checkNow" class="btn" type="button">
         <span class="btn__icon" aria-hidden="true">&#10227;</span>
         <span>Check now</span>
       </button>
+      </div>
     </header>
 
     <section class="summary" id="summary" aria-live="polite" aria-atomic="true">
@@ -523,6 +587,11 @@
     </div>
 
     <ul class="grid" id="grid"></ul>
+
+    <details class="diag" id="diag">
+      <summary>Diagnostics</summary>
+      <div class="diag__body" id="diagBody"></div>
+    </details>
 
     <footer class="note">
       <p>
@@ -929,6 +998,8 @@ const SERVICES = [
       state.lastCheckAt = now();
       paintLastCheck();
       paintSummary();
+      recordStats();
+      renderDiag();
 
       state.running = false;
       el.checkNow.disabled = false;
@@ -957,6 +1028,212 @@ const SERVICES = [
     state.results.forEach(function (_, i) { paintAgo(i); });
   }
 
+  // --- diagnostics ---------------------------------------------------------
+  // Everything below is read-only and best-effort. The IP/ISP lookup is the
+  // ONLY request that goes to a third party (not a monitored service); if it
+  // fails, the rest of the page works unchanged.
+  var NET_SOURCES = [
+    { url: "https://ipinfo.io/json", map: function (j) {
+        var m = /^(AS\d+)\s+(.*)$/.exec(j.org || "");
+        return { ip: j.ip, isp: m ? m[2] : j.org, asn: m ? m[1] : null,
+                 place: [j.city, j.region, j.country].filter(Boolean).join(", "), tz: j.timezone, src: "ipinfo.io" };
+    } },
+    { url: "https://ipwho.is/", map: function (j) {
+        if (j.success === false) throw new Error("fail");
+        var c = j.connection || {};
+        return { ip: j.ip, isp: c.isp || c.org, asn: c.asn ? "AS" + c.asn : null,
+                 place: [j.city, j.region, j.country].filter(Boolean).join(", "),
+                 tz: j.timezone && j.timezone.id, src: "ipwho.is" };
+    } },
+    { url: "https://ipapi.co/json/", map: function (j) {
+        if (j.error) throw new Error("fail");
+        return { ip: j.ip, isp: j.org, asn: j.asn,
+                 place: [j.city, j.region, j.country_name].filter(Boolean).join(", "), tz: j.timezone, src: "ipapi.co" };
+    } }
+  ];
+
+  var net = { status: "pending", data: null, at: null };
+  var stats = [];   // per service: { n, up, min, max, sum, last }
+
+  function lookupNet() {
+    net.status = "pending";
+    renderDiag();
+    var k = 0;
+    (function next() {
+      if (k >= NET_SOURCES.length) { net.status = "failed"; net.at = now(); renderDiag(); return; }
+      var src = NET_SOURCES[k++];
+      var t = createTimeout();
+      fetch(src.url, { cache: "no-store", signal: t.signal })
+        .then(function (r) { if (!r.ok) throw new Error("http " + r.status); return r.json(); })
+        .then(function (j) { t.cancel(); net.data = src.map(j); net.status = "ok"; net.at = now(); renderDiag(); })
+        .catch(function () { t.cancel(); next(); });
+    })();
+  }
+
+  function recordStats() {
+    state.results.forEach(function (r, i) {
+      var st = stats[i] || (stats[i] = { n: 0, up: 0, min: null, max: null, sum: 0, lat: 0 });
+      st.n++;
+      if (r.status === "up") st.up++;
+      if (typeof r.latency === "number") {
+        st.min = st.min === null ? r.latency : Math.min(st.min, r.latency);
+        st.max = st.max === null ? r.latency : Math.max(st.max, r.latency);
+        st.sum += r.latency; st.lat++;
+      }
+    });
+  }
+
+  function why(r) {
+    if (!r || r.status !== "down") return "";
+    var reason = String(r.reason || "");
+    if (reason.indexOf("timeout") !== -1) return "no answer in " + (TIMEOUT_MS / 1000) + "s (packets dropped / blackhole / firewall)";
+    var ms = (typeof r.latency === "number") ? r.latency : null;
+    return "failed" + (ms !== null ? " in " + ms + " ms" : "") +
+      (ms !== null && ms < 300 ? " (fast: DNS error, TCP refused/reset or TLS failure)" : " (slow failure: TLS/handshake or reset)");
+  }
+
+  function collectDiag() {
+    var out = [];
+    function sec(title) { out.push({ h: title }); }
+    function row(k, v, cls) { out.push({ k: k, v: (v === null || v === undefined || v === "") ? "\u2014" : String(v), cls: cls || "" }); }
+
+    sec("Network (your connection)");
+    if (net.status === "pending") row("Public IP / ISP", "looking up\u2026");
+    else if (net.status === "failed") row("Public IP / ISP", "lookup unavailable (offline, blocked or rate-limited)", "warn");
+    else {
+      var d = net.data || {};
+      row("Public IP", d.ip);
+      row("ISP / org", d.isp);
+      row("ASN", d.asn);
+      row("Location", d.place);
+      row("Server tz", d.tz);
+      row("Source", d.src);
+    }
+
+    sec("Connection (browser)");
+    var c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+    row("Online", navigator.onLine ? "yes" : "no", navigator.onLine ? "ok" : "bad");
+    if (c) {
+      row("Type", c.type);
+      row("Effective type", c.effectiveType);
+      row("Downlink", typeof c.downlink === "number" ? c.downlink + " Mbit/s" : null);
+      row("RTT estimate", typeof c.rtt === "number" ? c.rtt + " ms" : null);
+      row("Data saver", c.saveData ? "on" : "off");
+    } else {
+      row("Network Info API", "not supported by this browser");
+    }
+
+    sec("Last sweep");
+    var total = state.services.length, up = 0, lats = [], bad = [], slow = null;
+    state.results.forEach(function (r, i) {
+      if (r.status === "up") up++;
+      if (typeof r.latency === "number" && r.status === "up") {
+        lats.push(r.latency);
+        if (!slow || r.latency > slow.l) slow = { l: r.latency, n: state.services[i].name };
+      }
+      if (r.status === "down") bad.push({ n: state.services[i].name, r: r, i: i });
+    });
+    row("Result", up + " / " + total + " up", up === total ? "ok" : (up === 0 ? "bad" : "warn"));
+    if (lats.length) {
+      lats.sort(function (a, b) { return a - b; });
+      var avg = Math.round(lats.reduce(function (a, b) { return a + b; }, 0) / lats.length);
+      row("Latency min / median / avg / max", lats[0] + " / " + lats[Math.floor(lats.length / 2)] + " / " + avg + " / " + lats[lats.length - 1] + " ms");
+      row("Slowest", slow.n + " (" + slow.l + " ms)");
+    }
+    bad.forEach(function (b) {
+      var parts = b.r.parts ? state.services[b.i].urls.map(function (u, k) {
+        return hostOf(u) + (b.r.parts[k] === "up" ? " ok" : " DOWN");
+      }).join(", ") : "";
+      row("DOWN: " + b.n, (why(b.r) + (parts ? " [" + parts + "]" : "")).trim(), "bad");
+    });
+    if (state.lastCheckAt) row("Finished", new Date(state.lastCheckAt).toLocaleTimeString());
+
+    sec("Session history (since page load)");
+    var any = false;
+    stats.forEach(function (st, i) {
+      if (!st || !st.n) return;
+      if (st.up === st.n && st.n < 2) return;
+      any = true;
+      var pct = Math.round(st.up * 1000 / st.n) / 10;
+      row(state.services[i].name,
+        pct + "% (" + st.up + "/" + st.n + ")" + (st.lat ? ", " + st.min + "\u2013" + st.max + " ms, avg " + Math.round(st.sum / st.lat) : ""),
+        pct === 100 ? "ok" : (pct === 0 ? "bad" : "warn"));
+    });
+    if (!any) row("Sweeps", "collecting\u2026");
+
+    sec("Browser / page");
+    var tz; try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (e) { tz = null; }
+    row("User agent", navigator.userAgent);
+    row("Language", (navigator.languages && navigator.languages.join(", ")) || navigator.language);
+    row("Time zone", tz);
+    row("Viewport", window.innerWidth + "\u00d7" + window.innerHeight + " @" + (window.devicePixelRatio || 1) + "x");
+    row("Page", location.protocol + "//" + (location.host || "(local file)"));
+    row("Secure context", window.isSecureContext ? "yes" : "no");
+    row("Timeout / refresh", (TIMEOUT_MS / 1000) + "s / " + (REFRESH_MS / 1000) + "s");
+    return out;
+  }
+
+  function renderDiag() {
+    var root = document.getElementById("diagBody");
+    var box = document.getElementById("diag");
+    if (!root || !box || !box.open) return;   // render only while expanded
+    root.textContent = "";
+    var dl = null;
+    collectDiag().forEach(function (x) {
+      if (x.h) {
+        var h = document.createElement("h3"); h.textContent = x.h; root.appendChild(h);
+        dl = document.createElement("dl"); root.appendChild(dl);
+      } else {
+        var dt = document.createElement("dt"); dt.textContent = x.k;
+        var dd = document.createElement("dd"); dd.textContent = x.v; if (x.cls) dd.className = x.cls;
+        dl.appendChild(dt); dl.appendChild(dd);
+      }
+    });
+    var btn = document.createElement("button");
+    btn.type = "button"; btn.className = "btn"; btn.textContent = "Copy report";
+    btn.addEventListener("click", copyReport);
+    root.appendChild(btn);
+  }
+
+  function reportText() {
+    var lines = ["Service Reachability \u2014 " + new Date().toString(), "Page: " + location.href];
+    collectDiag().forEach(function (x) { lines.push(x.h ? "\n[" + x.h + "]" : x.k + ": " + x.v); });
+    return lines.join("\n");
+  }
+
+  // resolves true if the text reached the clipboard
+  function copyText(text) {
+    function legacy() {
+      var ta = document.createElement("textarea");
+      ta.value = text; ta.setAttribute("readonly", "");
+      ta.style.position = "fixed"; ta.style.opacity = "0"; ta.style.top = "0";
+      document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0, text.length);
+      var ok = false;
+      try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+      document.body.removeChild(ta);
+      return ok;
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).then(function () { return true; }, function () { return legacy(); });
+    }
+    return Promise.resolve(legacy());
+  }
+
+  function copyReport(ev) {
+    var btn = (ev && ev.currentTarget) || document.getElementById("copyTop");
+    var label = btn.querySelector(".btn__label") || btn;
+    var original = label.textContent;
+    copyText(reportText()).then(function (ok) {
+      label.textContent = ok ? "Copied \u2713" : "Copy failed";
+      btn.classList.add(ok ? "is-ok" : "is-bad");
+      if (!ok) { var d = document.getElementById("diag"); if (d) d.open = true; }
+      setTimeout(function () {
+        label.textContent = original;
+        btn.classList.remove("is-ok", "is-bad");
+      }, 2200);
+    });
+  }
+
   // --- init ----------------------------------------------------------------
   function init() {
     buildCards();
@@ -964,7 +1241,12 @@ const SERVICES = [
     paintSummary();
     paintLastCheck();
 
-    el.checkNow.addEventListener("click", function () { checkAll(); });
+    el.checkNow.addEventListener("click", function () { checkAll(); lookupNet(); });
+    document.getElementById("diag").addEventListener("toggle", renderDiag);
+    document.getElementById("copyTop").addEventListener("click", copyReport);
+    window.addEventListener("online", lookupNet);
+    window.addEventListener("offline", renderDiag);
+    lookupNet();
 
     document.addEventListener("visibilitychange", function () {
       if (!document.hidden && state.nextAt && now() > state.nextAt && !state.running) {
