@@ -999,6 +999,8 @@ const SERVICES = [
       );
     });
 
+    probeControls().then(renderDiag);
+
     Promise.allSettled(tasks).then(function (settled) {
       settled.forEach(function (entry, idx) {
         var payload;
@@ -1076,6 +1078,71 @@ const SERVICES = [
     } }
   ];
 
+  // Neutral hosts probed with the same method: tell "my internet is down" from "only OneCell is down".
+  var CONTROLS = [
+    { name: "Yandex",  url: "https://ya.ru" },
+    { name: "GitHub",  url: "https://github.com" },
+    { name: "Google",  url: "https://www.google.com" }
+  ];
+  var controls = [];   // [{ name, status, latency }]
+  var dns = {};        // host -> { status: "ok"|"nxdomain"|"error", ips: [], ttl }
+  var dnsAt = 0;
+
+  function allHosts() {
+    var seen = {}, list = [];
+    state.services.forEach(function (svc) {
+      svc.urls.forEach(function (u) { var h = hostOf(u); if (!seen[h]) { seen[h] = 1; list.push(h); } });
+    });
+    return list;
+  }
+
+  // DNS over HTTPS (dns.google answers with CORS headers). Each host is asked twice: as-is (Google sends the
+  // client's own /24 as EDNS Client Subnet) and with ECS disabled (0.0.0.0/0, what a resolver that drops ECS
+  // would see). Geo-DNS hosts answer differently. Shows Google's view, not the visitor's local resolver.
+  function doh(h, ecs) {
+    var t = createTimeout();
+    var url = "https://dns.google/resolve?name=" + encodeURIComponent(h) + "&type=A" + (ecs ? "&edns_client_subnet=" + ecs : "");
+    return fetch(url, { cache: "no-store", signal: t.signal })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        t.cancel();
+        var a = (j.Answer || []).filter(function (x) { return x.type === 1; });
+        return {
+          status: j.Status === 3 ? "nxdomain" : (a.length ? "ok" : (j.Status === 0 ? "noa" : "error")),
+          ips: a.map(function (x) { return x.data; }),
+          ttl: a.length ? a[0].TTL : null,
+          ecs: j.edns_client_subnet || null
+        };
+      })
+      .catch(function () { t.cancel(); return { status: "error", ips: [], ttl: null, ecs: null }; });
+  }
+
+  function lookupDns() {
+    if (typeof fetch !== "function") return;
+    dnsAt = now();
+    allHosts().forEach(function (h) {
+      Promise.all([doh(h, null), doh(h, "0.0.0.0/0")]).then(function (rs) {
+        dns[h] = rs[0];
+        dns[h].plain = rs[1];
+        renderDiag();
+      });
+    });
+  }
+
+  // true when both answers exist and share no address (round-robin overlap is not a geo difference)
+  function ecsDiffers(d) {
+    if (!d || d.status !== "ok" || !d.plain || d.plain.status !== "ok") return false;
+    return !d.ips.some(function (ip) { return d.plain.ips.indexOf(ip) !== -1; });
+  }
+
+  function probeControls() {
+    return Promise.all(CONTROLS.map(function (c) {
+      return probeOne({ url: c.url }).then(function (r) {
+        return { name: c.name, status: r.status, latency: r.latency };
+      });
+    })).then(function (rs) { controls = rs; });
+  }
+
   var net = { status: "pending", data: null, at: null };
   var stats = [];   // per service: { n, up, min, max, sum, last }
 
@@ -1134,6 +1201,11 @@ const SERVICES = [
       row("Source", d.src);
     }
 
+    if (net.status === "ok" && net.data && net.data.tz) {
+      var btz; try { btz = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (e) { btz = null; }
+      if (btz && btz !== net.data.tz) row("Time zone mismatch", "IP says " + net.data.tz + ", browser says " + btz + " (VPN / proxy?)", "warn");
+    }
+
     sec("Connection (browser)");
     var c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
     row("Online", navigator.onLine ? "yes" : "no", navigator.onLine ? "ok" : "bad");
@@ -1145,6 +1217,22 @@ const SERVICES = [
       row("Data saver", c.saveData ? "on" : "off");
     } else {
       row("Network Info API", "not supported by this browser");
+    }
+
+    sec("Control hosts (is it you or OneCell?)");
+    if (!controls.length) row("Controls", "probing\u2026");
+    else {
+      controls.forEach(function (c) {
+        row(c.name, (c.status === "up" ? "reachable" : "UNREACHABLE") + (typeof c.latency === "number" ? " (" + c.latency + " ms)" : ""), c.status === "up" ? "ok" : "bad");
+      });
+      var cUp = controls.filter(function (c) { return c.status === "up"; }).length;
+      var sDown = state.results.filter(function (r) { return r.status === "down"; }).length;
+      var verdict, vcls;
+      if (cUp === 0) { verdict = "Your internet looks down (no control host answers) \u2014 results below are unreliable"; vcls = "bad"; }
+      else if (sDown === 0) { verdict = "All good: controls and services reachable"; vcls = "ok"; }
+      else if (sDown === state.results.length) { verdict = "Internet works, but NO OneCell service answers \u2014 route/ISP block or OneCell-wide outage"; vcls = "bad"; }
+      else { verdict = "Internet works; only some OneCell services are down \u2014 problem is on their side or on the route to them"; vcls = "warn"; }
+      row("Verdict", verdict, vcls);
     }
 
     sec("Last sweep");
@@ -1168,7 +1256,11 @@ const SERVICES = [
       var parts = b.r.parts ? state.services[b.i].urls.map(function (u, k) {
         return hostOf(u) + (b.r.parts[k] === "up" ? " ok" : " DOWN");
       }).join(", ") : "";
-      row("DOWN: " + b.n, (why(b.r) + (parts ? " [" + parts + "]" : "")).trim(), "bad");
+      var dh = state.services[b.i].urls.map(function (u) {
+        var d = dns[hostOf(u)];
+        return d ? hostOf(u) + " \u2192 " + (d.status === "ok" ? d.ips.join("/") : d.status.toUpperCase()) : "";
+      }).filter(Boolean).join("; ");
+      row("DOWN: " + b.n, (why(b.r) + (parts ? " [" + parts + "]" : "") + (dh ? " {dns: " + dh + "}" : "")).trim(), "bad");
     });
     if (state.lastCheckAt) row("Finished", new Date(state.lastCheckAt).toLocaleTimeString());
 
@@ -1184,6 +1276,38 @@ const SERVICES = [
         pct === 100 ? "ok" : (pct === 0 ? "bad" : "warn"));
     });
     if (!any) row("Sweeps", "collecting\u2026");
+
+    sec("ECS exposure (DNS via dns.google, DoH)");
+    var dh2 = allHosts();
+    if (!dnsAt) row("DoH", "not started");
+    else {
+      var done = 0, diff = [], same = 0, fail = 0, nx = [], ecsUsed = null;
+      dh2.forEach(function (h) {
+        var d = dns[h];
+        if (!d) return;
+        done++;
+        if (d.ecs && !ecsUsed) ecsUsed = d.ecs;
+        if (d.status === "nxdomain") nx.push(h);
+        else if (d.status === "error" || (d.plain && d.plain.status === "error")) fail++;
+        else if (ecsDiffers(d)) diff.push(h);
+        else same++;
+      });
+      if (done < dh2.length) row("Progress", done + " / " + dh2.length + " resolved\u2026");
+      row("Client subnet sent", ecsUsed || "your /24 (implicit, added by dns.google)");
+      row("ECS-dependent hosts", diff.length + " of " + done,
+        diff.length ? "warn" : "ok");
+      diff.forEach(function (h) {
+        var d = dns[h];
+        row(h, "with ECS " + d.ips.join("/") + "  |  without ECS " + d.plain.ips.join("/"), "warn");
+      });
+      if (same) row("Same answer either way", same + " host(s)");
+      nx.forEach(function (h) { row(h, "NXDOMAIN \u2014 name does not exist", "bad"); });
+      if (fail) row("DoH failed", fail + " host(s) (dns.google unreachable from here?)", "warn");
+      if (diff.length) {
+        row("Meaning", "These hosts resolve to different servers depending on the resolver's EDNS Client Subnet. A local resolver that strips ECS (or forwards via a foreign upstream) lands on the 'without ECS' address.");
+        row("Check locally", "dig +short " + diff[0] + "  vs  dig +short +subnet=" + (ecsUsed || "<your /24>") + " " + diff[0] + " @8.8.8.8");
+      }
+    }
 
     sec("Browser / page");
     var tz; try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (e) { tz = null; }
@@ -1265,12 +1389,13 @@ const SERVICES = [
     paintSummary();
     paintLastCheck();
 
-    el.checkNow.addEventListener("click", function () { checkAll(); lookupNet(); });
+    el.checkNow.addEventListener("click", function () { checkAll(); lookupNet(); if (now() - dnsAt > 300000) lookupDns(); });
     document.getElementById("diag").addEventListener("toggle", renderDiag);
     document.getElementById("copyTop").addEventListener("click", copyReport);
     window.addEventListener("online", lookupNet);
     window.addEventListener("offline", renderDiag);
     lookupNet();
+    lookupDns();
 
     document.addEventListener("visibilitychange", function () {
       if (!document.hidden && state.nextAt && now() > state.nextAt && !state.running) {
