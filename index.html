@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
-<title>Service Reachability Monitor</title>
+<title>Доступность сервисов OneCell</title>
 <style>
   /* palette mirrors onecell.ru: flat black/white surfaces, hairline dividers, one blue accent */
   :root {
@@ -178,6 +178,15 @@
   .btn.is-busy .btn__icon { animation: spin 1.1s linear infinite; }
 
   .topbar__actions { display: flex; align-items: center; gap: 8px; flex: none; }
+  .btn--big {
+    display: flex; width: 100%; justify-content: center;
+    min-height: 60px; margin: 14px 0 0; font-size: 17px; letter-spacing: 0.01em;
+    color: #fff; background: var(--accent); border-color: var(--accent);
+  }
+  .btn--big:hover { background: var(--accent); border-color: var(--accent); filter: brightness(1.12); }
+  .btn--big .btn__icon { font-size: 20px; }
+  .btn--big.is-ok  { background: transparent; border-color: var(--up-br);   color: var(--up); }
+  .btn--big.is-bad { background: transparent; border-color: var(--down-br); color: var(--down); }
   .btn.is-ok  { border-color: var(--up-br);   color: var(--up); }
   .btn.is-bad { border-color: var(--down-br); color: var(--down); }
 
@@ -513,10 +522,7 @@
     h1 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
     .btn { min-height: 44px; min-width: 44px; padding: 8px 14px; justify-content: center; flex: none; }
     .topbar__actions { gap: 6px; }
-    #copyTop { padding: 8px 12px; }
-    #copyTop .btn__label { display: none; }   /* icon-only on phones */
-    #copyTop.is-ok .btn__label, #copyTop.is-bad .btn__label { display: inline; }
-    #copyTop.is-ok .btn__icon, #copyTop.is-bad .btn__icon { display: none; }
+    .btn--big { min-height: 56px; font-size: 16px; }
 
     .summary { flex-wrap: nowrap; gap: 12px; padding: 8px 12px; }
     .summary__count { font-size: 24px; }
@@ -579,17 +585,13 @@
       <div class="brand">
         <div>
           <p class="brand__word" aria-hidden="true">OneCell</p>
-          <h1>Service Reachability</h1>
+          <h1>Доступность сервисов</h1>
         </div>
       </div>
       <div class="topbar__actions">
-      <button id="copyTop" class="btn" type="button" title="Copy diagnostics to clipboard" aria-label="Copy diagnostics report">
-        <span class="btn__icon" aria-hidden="true">&#10064;</span>
-        <span class="btn__label">Copy report</span>
-      </button>
       <button id="checkNow" class="btn" type="button">
         <span class="btn__icon" aria-hidden="true">&#10227;</span>
-        <span>Check now</span>
+        <span>Проверить</span>
       </button>
       </div>
     </header>
@@ -597,34 +599,39 @@
     <section class="summary" id="summary" aria-live="polite" aria-atomic="true">
       <div class="summary__main">
         <p class="summary__count">
-          <span id="upCount">0</span><span class="summary__slash">/</span><span id="totalCount">0</span><span class="summary__unit">up</span>
+          <span id="upCount">0</span><span class="summary__slash">/</span><span id="totalCount">0</span><span class="summary__unit">доступно</span>
         </p>
-        <p class="summary__state" id="stateBanner" data-state="checking">Starting&hellip;</p>
+        <p class="summary__state" id="stateBanner" data-state="checking">Запуск&hellip;</p>
       </div>
       <div class="summary__side" aria-hidden="true">
-        <p class="summary__meta" id="lastCheck">Last check: &mdash;</p>
-        <p class="summary__meta">Next in <span id="countdown">30</span>s</p>
+        <p class="summary__meta" id="lastCheck">Последняя проверка: &mdash;</p>
+        <p class="summary__meta">Следующая через <span id="countdown">30</span> с</p>
       </div>
     </section>
 
     <div class="progress" id="progress" aria-hidden="true"><span id="progressBar"></span></div>
     </div>
 
+    <button id="copyTop" class="btn btn--big" type="button" title="Скопировать диагностику в буфер обмена" aria-label="Скопировать диагностику">
+      <span class="btn__icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg></span>
+      <span class="btn__label">Скопировать диагностику</span>
+    </button>
+
     <ul class="grid" id="grid"></ul>
 
     <details class="diag" id="diag">
-      <summary>Diagnostics</summary>
+      <summary>Диагностика</summary>
       <div class="diag__body" id="diagBody"></div>
     </details>
 
     <footer class="note">
       <p>
-        <strong>How this works.</strong> Every service is probed straight from your browser with a
-        <code>fetch(&hellip;, { mode: "no-cors" })</code> request (an image probe is used as a fallback if
-        <code>fetch</code> is unavailable). Browser CORS rules hide the HTTP status code, so
-        <strong>&ldquo;UP&rdquo; only means the host answered at the network level</strong> &mdash; it does not prove the
-        service itself is healthy. Each probe is capped at ~6&nbsp;seconds; a host that is unreachable, blocked,
-        or offline is reported as DOWN. The list is checked automatically every 30&nbsp;seconds.
+        <strong>Как это работает.</strong> Каждый сервис проверяется прямо из вашего браузера запросом
+        <code>fetch(&hellip;, { mode: "no-cors" })</code> (если <code>fetch</code> недоступен, используется проверка
+        через картинку). Правила CORS скрывают код ответа HTTP, поэтому
+        <strong>&laquo;доступен&raquo; означает лишь, что хост ответил на уровне сети</strong> &mdash; это не доказывает,
+        что сам сервис исправен. Каждая проверка ограничена ~6&nbsp;секундами; недоступный, заблокированный
+        или офлайн-хост помечается как недоступный. Список проверяется автоматически каждые 30&nbsp;секунд.
       </p>
     </footer>
   </main>
@@ -653,10 +660,8 @@ const SERVICES = [
   { name: "Meet",             url: "https://meet.onecell.ru" },
   { name: "Meet auth",        url: "https://auth-meet.onecell.ru" },
   { name: "Harbor",           url: "https://harbor.onecell.ru" },
-  { name: "Nexus",            url: "https://nexus.onecell.ru" },
+  { name: "GitLab",           url: "https://gitlab.onecell.ru" },
   { name: "Docker registry",  url: "https://docker.onecell.ru" },
-  { name: "Sentry",           url: "https://sentry.onecell.ru" },
-  { name: "Alertmanager",     url: "https://alertmanager.onecell.ru" },
   { name: "Terraform",        url: "https://terraform.onecell.ru" },
   { name: "Notion",           url: "https://notion.onecell.ru" },
   { name: "Portal",           url: "https://portal.onecell.ru" },
@@ -703,7 +708,7 @@ const SERVICES = [
   };
 
   var ICONS  = { checking: "\u27F3", up: "\u2713", down: "\u2715" };
-  var LABELS = { checking: "CHECKING", up: "UP", down: "DOWN" };
+  var LABELS = { checking: "ПРОВЕРКА", up: "ДОСТУПЕН", down: "НЕДОСТУПЕН" };
 
   // --- tiny helpers --------------------------------------------------------
   function now() { return Date.now(); }
@@ -712,10 +717,10 @@ const SERVICES = [
   function relative(ts) {
     if (!ts) return "\u2014";
     var s = Math.max(0, Math.round((now() - ts) / 1000));
-    if (s < 1)  return "checked just now";
-    if (s < 60) return "checked " + s + "s ago";
+    if (s < 1)  return "проверено только что";
+    if (s < 60) return "проверено " + s + " с назад";
     var m = Math.floor(s / 60);
-    return "checked " + m + "m " + (s % 60) + "s ago";
+    return "проверено " + m + " мин " + (s % 60) + " с назад";
   }
 
   function hostOf(u) { return String(u).replace(/^[a-z]+:\/\//i, "").replace(/\/.*$/, ""); }
@@ -731,7 +736,7 @@ const SERVICES = [
     if (state.services.length === 0) {
       var empty = document.createElement("li");
       empty.className = "empty";
-      empty.textContent = "No services configured \u2014 add entries to the SERVICES array.";
+      empty.textContent = "Сервисы не настроены — добавьте записи в массив SERVICES.";
       el.grid.appendChild(empty);
       return;
     }
@@ -790,7 +795,7 @@ const SERVICES = [
       lat.className = "card__latency";
       var latK = document.createElement("span");
       latK.className = "card__k";
-      latK.textContent = "latency";
+      latK.textContent = "задержка";
       var latV = document.createElement("span");
       latV.className = "card__v";
       latV.textContent = "\u2014";
@@ -799,7 +804,7 @@ const SERVICES = [
 
       var ago = document.createElement("span");
       ago.className = "card__ago";
-      ago.textContent = "probing\u2026";
+      ago.textContent = "проверка…";
 
       foot.appendChild(lat);
       foot.appendChild(ago);
@@ -824,8 +829,8 @@ const SERVICES = [
     c.badge.dataset.status = st;
     c.icon.textContent = ICONS[st];
     c.label.textContent = LABELS[st];
-    c.latV.textContent = (typeof r.latency === "number") ? r.latency + " ms" : "\u2014";
-    c.ago.textContent = (st === "checking") ? "probing\u2026" : relative(r.checkedAt);
+    c.latV.textContent = (typeof r.latency === "number") ? r.latency + " мс" : "\u2014";
+    c.ago.textContent = (st === "checking") ? "проверка…" : relative(r.checkedAt);
     if (c.url && state.services[i].urls.length > 1) {
       var svc = state.services[i];
       c.url.textContent = svc.urls.map(function (u, k) {
@@ -856,15 +861,15 @@ const SERVICES = [
 
     var name, text;
     if (total === 0) {
-      name = "checking"; text = "No services configured";
+      name = "checking"; text = "Сервисы не настроены";
     } else if (checking > 0) {
-      name = "checking"; text = "Checking services\u2026";
+      name = "checking"; text = "Проверяем сервисы…";
     } else if (down === 0) {
-      name = "up"; text = "All services reachable";
+      name = "up"; text = "Все сервисы доступны";
     } else if (up === 0) {
-      name = "down"; text = "All services unreachable";
+      name = "down"; text = "Все сервисы недоступны";
     } else {
-      name = "degraded"; text = "Degraded \u2014 " + down + " unreachable";
+      name = "degraded"; text = "Частичный сбой — недоступно: " + down;
     }
 
     el.stateBanner.dataset.state = name;
@@ -872,8 +877,8 @@ const SERVICES = [
   }
 
   function paintLastCheck() {
-    if (!state.lastCheckAt) { el.lastCheck.textContent = "Last check: \u2014"; return; }
-    el.lastCheck.textContent = "Last check: " + relative(state.lastCheckAt).replace("checked ", "");
+    if (!state.lastCheckAt) { el.lastCheck.textContent = "Последняя проверка: —"; return; }
+    el.lastCheck.textContent = "Последняя проверка: " + relative(state.lastCheckAt).replace("проверено ", "");
   }
 
   // --- timeout plumbing ----------------------------------------------------
@@ -1177,10 +1182,10 @@ const SERVICES = [
   function why(r) {
     if (!r || r.status !== "down") return "";
     var reason = String(r.reason || "");
-    if (reason.indexOf("timeout") !== -1) return "no answer in " + (TIMEOUT_MS / 1000) + "s (packets dropped / blackhole / firewall)";
+    if (reason.indexOf("timeout") !== -1) return "нет ответа за " + (TIMEOUT_MS / 1000) + " с (пакеты отбрасываются / blackhole / файрвол)";
     var ms = (typeof r.latency === "number") ? r.latency : null;
-    return "failed" + (ms !== null ? " in " + ms + " ms" : "") +
-      (ms !== null && ms < 300 ? " (fast: DNS error, TCP refused/reset or TLS failure)" : " (slow failure: TLS/handshake or reset)");
+    return "сбой" + (ms !== null ? " за " + ms + " мс" : "") +
+      (ms !== null && ms < 300 ? " (быстро: ошибка DNS, отказ/сброс TCP или сбой TLS)" : " (медленный сбой: TLS/рукопожатие или сброс)");
   }
 
   function collectDiag() {
@@ -1188,54 +1193,54 @@ const SERVICES = [
     function sec(title) { out.push({ h: title }); }
     function row(k, v, cls) { out.push({ k: k, v: (v === null || v === undefined || v === "") ? "\u2014" : String(v), cls: cls || "" }); }
 
-    sec("Network (your connection)");
-    if (net.status === "pending") row("Public IP / ISP", "looking up\u2026");
-    else if (net.status === "failed") row("Public IP / ISP", "lookup unavailable (offline, blocked or rate-limited)", "warn");
+    sec("Сеть (ваше подключение)");
+    if (net.status === "pending") row("Публичный IP / провайдер", "определяем\u2026");
+    else if (net.status === "failed") row("Публичный IP / провайдер", "определить не удалось (офлайн, блокировка или лимит запросов)", "warn");
     else {
       var d = net.data || {};
-      row("Public IP", d.ip);
-      row("ISP / org", d.isp);
+      row("Публичный IP", d.ip);
+      row("Провайдер / организация", d.isp);
       row("ASN", d.asn);
-      row("Location", d.place);
-      row("Server tz", d.tz);
-      row("Source", d.src);
+      row("Местоположение", d.place);
+      row("Часовой пояс по IP", d.tz);
+      row("Источник", d.src);
     }
 
     if (net.status === "ok" && net.data && net.data.tz) {
       var btz; try { btz = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (e) { btz = null; }
-      if (btz && btz !== net.data.tz) row("Time zone mismatch", "IP says " + net.data.tz + ", browser says " + btz + " (VPN / proxy?)", "warn");
+      if (btz && btz !== net.data.tz) row("Часовые пояса не совпадают", "по IP: " + net.data.tz + ", в браузере: " + btz + " (VPN / прокси?)", "warn");
     }
 
-    sec("Connection (browser)");
+    sec("Подключение (браузер)");
     var c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
-    row("Online", navigator.onLine ? "yes" : "no", navigator.onLine ? "ok" : "bad");
+    row("Онлайн", navigator.onLine ? "да" : "нет", navigator.onLine ? "ok" : "bad");
     if (c) {
-      row("Type", c.type);
-      row("Effective type", c.effectiveType);
-      row("Downlink", typeof c.downlink === "number" ? c.downlink + " Mbit/s" : null);
-      row("RTT estimate", typeof c.rtt === "number" ? c.rtt + " ms" : null);
-      row("Data saver", c.saveData ? "on" : "off");
+      row("Тип", c.type);
+      row("Эффективный тип", c.effectiveType);
+      row("Скорость (оценка)", typeof c.downlink === "number" ? c.downlink + " Мбит/с" : null);
+      row("RTT (оценка)", typeof c.rtt === "number" ? c.rtt + " мс" : null);
+      row("Экономия трафика", c.saveData ? "вкл" : "выкл");
     } else {
-      row("Network Info API", "not supported by this browser");
+      row("Network Info API", "не поддерживается браузером");
     }
 
-    sec("Control hosts (is it you or OneCell?)");
-    if (!controls.length) row("Controls", "probing\u2026");
+    sec("Контрольные хосты (проблема у вас или у OneCell?)");
+    if (!controls.length) row("Контрольные", "проверка…");
     else {
       controls.forEach(function (c) {
-        row(c.name, (c.status === "up" ? "reachable" : "UNREACHABLE") + (typeof c.latency === "number" ? " (" + c.latency + " ms)" : ""), c.status === "up" ? "ok" : "bad");
+        row(c.name, (c.status === "up" ? "доступен" : "НЕДОСТУПЕН") + (typeof c.latency === "number" ? " (" + c.latency + " ms)" : ""), c.status === "up" ? "ok" : "bad");
       });
       var cUp = controls.filter(function (c) { return c.status === "up"; }).length;
       var sDown = state.results.filter(function (r) { return r.status === "down"; }).length;
       var verdict, vcls;
-      if (cUp === 0) { verdict = "Your internet looks down (no control host answers) \u2014 results below are unreliable"; vcls = "bad"; }
-      else if (sDown === 0) { verdict = "All good: controls and services reachable"; vcls = "ok"; }
-      else if (sDown === state.results.length) { verdict = "Internet works, but NO OneCell service answers \u2014 route/ISP block or OneCell-wide outage"; vcls = "bad"; }
-      else { verdict = "Internet works; only some OneCell services are down \u2014 problem is on their side or on the route to them"; vcls = "warn"; }
-      row("Verdict", verdict, vcls);
+      if (cUp === 0) { verdict = "Похоже, нет интернета (ни один контрольный хост не отвечает) — результаты ниже недостоверны"; vcls = "bad"; }
+      else if (sDown === 0) { verdict = "Всё хорошо: контрольные хосты и сервисы доступны"; vcls = "ok"; }
+      else if (sDown === state.results.length) { verdict = "Интернет работает, но ни один сервис OneCell не отвечает — блокировка на маршруте/у провайдера или общий сбой OneCell"; vcls = "bad"; }
+      else { verdict = "Интернет работает; недоступна только часть сервисов OneCell — проблема на их стороне или на маршруте до них"; vcls = "warn"; }
+      row("Вывод", verdict, vcls);
     }
 
-    sec("Last sweep");
+    sec("Последняя проверка");
     var total = state.services.length, up = 0, lats = [], bad = [], slow = null;
     state.results.forEach(function (r, i) {
       if (r.status === "up") up++;
@@ -1245,26 +1250,26 @@ const SERVICES = [
       }
       if (r.status === "down") bad.push({ n: state.services[i].name, r: r, i: i });
     });
-    row("Result", up + " / " + total + " up", up === total ? "ok" : (up === 0 ? "bad" : "warn"));
+    row("Результат", up + " / " + total + " доступно", up === total ? "ok" : (up === 0 ? "bad" : "warn"));
     if (lats.length) {
       lats.sort(function (a, b) { return a - b; });
       var avg = Math.round(lats.reduce(function (a, b) { return a + b; }, 0) / lats.length);
-      row("Latency min / median / avg / max", lats[0] + " / " + lats[Math.floor(lats.length / 2)] + " / " + avg + " / " + lats[lats.length - 1] + " ms");
-      row("Slowest", slow.n + " (" + slow.l + " ms)");
+      row("Задержка мин / медиана / сред / макс", lats[0] + " / " + lats[Math.floor(lats.length / 2)] + " / " + avg + " / " + lats[lats.length - 1] + " мс");
+      row("Самый медленный", slow.n + " (" + slow.l + " мс)");
     }
     bad.forEach(function (b) {
       var parts = b.r.parts ? state.services[b.i].urls.map(function (u, k) {
-        return hostOf(u) + (b.r.parts[k] === "up" ? " ok" : " DOWN");
+        return hostOf(u) + (b.r.parts[k] === "up" ? " ок" : " НЕДОСТУПЕН");
       }).join(", ") : "";
       var dh = state.services[b.i].urls.map(function (u) {
         var d = dns[hostOf(u)];
         return d ? hostOf(u) + " \u2192 " + (d.status === "ok" ? d.ips.join("/") : d.status.toUpperCase()) : "";
       }).filter(Boolean).join("; ");
-      row("DOWN: " + b.n, (why(b.r) + (parts ? " [" + parts + "]" : "") + (dh ? " {dns: " + dh + "}" : "")).trim(), "bad");
+      row("НЕДОСТУПЕН: " + b.n, (why(b.r) + (parts ? " [" + parts + "]" : "") + (dh ? " {dns: " + dh + "}" : "")).trim(), "bad");
     });
-    if (state.lastCheckAt) row("Finished", new Date(state.lastCheckAt).toLocaleTimeString());
+    if (state.lastCheckAt) row("Завершена в", new Date(state.lastCheckAt).toLocaleTimeString());
 
-    sec("Session history (since page load)");
+    sec("История сессии (с момента открытия страницы)");
     var any = false;
     stats.forEach(function (st, i) {
       if (!st || !st.n) return;
@@ -1272,14 +1277,14 @@ const SERVICES = [
       any = true;
       var pct = Math.round(st.up * 1000 / st.n) / 10;
       row(state.services[i].name,
-        pct + "% (" + st.up + "/" + st.n + ")" + (st.lat ? ", " + st.min + "\u2013" + st.max + " ms, avg " + Math.round(st.sum / st.lat) : ""),
+        pct + "% (" + st.up + "/" + st.n + ")" + (st.lat ? ", " + st.min + "\u2013" + st.max + " мс, сред. " + Math.round(st.sum / st.lat) : ""),
         pct === 100 ? "ok" : (pct === 0 ? "bad" : "warn"));
     });
-    if (!any) row("Sweeps", "collecting\u2026");
+    if (!any) row("Проверки", "накапливаем данные\u2026");
 
-    sec("ECS exposure (DNS via dns.google, DoH)");
+    sec("Зависимость от ECS (DNS через dns.google, DoH)");
     var dh2 = allHosts();
-    if (!dnsAt) row("DoH", "not started");
+    if (!dnsAt) row("DoH", "не запускался");
     else {
       var done = 0, diff = [], same = 0, fail = 0, nx = [], ecsUsed = null;
       dh2.forEach(function (h) {
@@ -1292,32 +1297,32 @@ const SERVICES = [
         else if (ecsDiffers(d)) diff.push(h);
         else same++;
       });
-      if (done < dh2.length) row("Progress", done + " / " + dh2.length + " resolved\u2026");
-      row("Client subnet sent", ecsUsed || "your /24 (implicit, added by dns.google)");
-      row("ECS-dependent hosts", diff.length + " of " + done,
+      if (done < dh2.length) row("Прогресс", "разрешено " + done + " из " + dh2.length + "\u2026");
+      row("Отправленная подсеть клиента", ecsUsed || "ваша /24 (неявно, добавляет dns.google)");
+      row("Хосты, зависящие от ECS", diff.length + " из " + done,
         diff.length ? "warn" : "ok");
       diff.forEach(function (h) {
         var d = dns[h];
-        row(h, "with ECS " + d.ips.join("/") + "  |  without ECS " + d.plain.ips.join("/"), "warn");
+        row(h, "с ECS " + d.ips.join("/") + "  |  без ECS " + d.plain.ips.join("/"), "warn");
       });
-      if (same) row("Same answer either way", same + " host(s)");
-      nx.forEach(function (h) { row(h, "NXDOMAIN \u2014 name does not exist", "bad"); });
-      if (fail) row("DoH failed", fail + " host(s) (dns.google unreachable from here?)", "warn");
+      if (same) row("Одинаковый ответ в обоих случаях", same + " хост(ов)");
+      nx.forEach(function (h) { row(h, "NXDOMAIN — имя не существует", "bad"); });
+      if (fail) row("Ошибка DoH", fail + " хост(ов) (dns.google недоступен отсюда?)", "warn");
       if (diff.length) {
-        row("Meaning", "These hosts resolve to different servers depending on the resolver's EDNS Client Subnet. A local resolver that strips ECS (or forwards via a foreign upstream) lands on the 'without ECS' address.");
-        row("Check locally", "dig +short " + diff[0] + "  vs  dig +short +subnet=" + (ecsUsed || "<your /24>") + " " + diff[0] + " @8.8.8.8");
+        row("Что это значит", "Эти хосты резолвятся в разные серверы в зависимости от EDNS Client Subnet резолвера. Локальный резолвер, который отбрасывает ECS (или ходит через зарубежный upstream), получит адрес из колонки «без ECS».");
+        row("Проверить локально", "dig +short " + diff[0] + "  и  dig +short +subnet=" + (ecsUsed || "<ваша /24>") + " " + diff[0] + " @8.8.8.8");
       }
     }
 
-    sec("Browser / page");
+    sec("Браузер / страница");
     var tz; try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (e) { tz = null; }
     row("User agent", navigator.userAgent);
-    row("Language", (navigator.languages && navigator.languages.join(", ")) || navigator.language);
-    row("Time zone", tz);
-    row("Viewport", window.innerWidth + "\u00d7" + window.innerHeight + " @" + (window.devicePixelRatio || 1) + "x");
-    row("Page", location.protocol + "//" + (location.host || "(local file)"));
-    row("Secure context", window.isSecureContext ? "yes" : "no");
-    row("Timeout / refresh", (TIMEOUT_MS / 1000) + "s / " + (REFRESH_MS / 1000) + "s");
+    row("Язык", (navigator.languages && navigator.languages.join(", ")) || navigator.language);
+    row("Часовой пояс", tz);
+    row("Размер окна", window.innerWidth + "\u00d7" + window.innerHeight + " @" + (window.devicePixelRatio || 1) + "x");
+    row("Страница", location.protocol + "//" + (location.host || "(локальный файл)"));
+    row("Защищённый контекст", window.isSecureContext ? "да" : "нет");
+    row("Таймаут / обновление", (TIMEOUT_MS / 1000) + " с / " + (REFRESH_MS / 1000) + " с");
     return out;
   }
 
@@ -1338,13 +1343,13 @@ const SERVICES = [
       }
     });
     var btn = document.createElement("button");
-    btn.type = "button"; btn.className = "btn"; btn.textContent = "Copy report";
+    btn.type = "button"; btn.className = "btn"; btn.textContent = "Скопировать диагностику";
     btn.addEventListener("click", copyReport);
     root.appendChild(btn);
   }
 
   function reportText() {
-    var lines = ["Service Reachability \u2014 " + new Date().toString(), "Page: " + location.href];
+    var lines = ["Доступность сервисов OneCell — " + new Date().toString(), "Страница: " + location.href];
     collectDiag().forEach(function (x) { lines.push(x.h ? "\n[" + x.h + "]" : x.k + ": " + x.v); });
     return lines.join("\n");
   }
@@ -1372,7 +1377,7 @@ const SERVICES = [
     var label = btn.querySelector(".btn__label") || btn;
     var original = label.textContent;
     copyText(reportText()).then(function (ok) {
-      label.textContent = ok ? "Copied \u2713" : "Copy failed";
+      label.textContent = ok ? "Скопировано ✓" : "Не удалось скопировать";
       btn.classList.add(ok ? "is-ok" : "is-bad");
       if (!ok) { var d = document.getElementById("diag"); if (d) d.open = true; }
       setTimeout(function () {
