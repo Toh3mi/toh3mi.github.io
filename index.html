@@ -324,6 +324,7 @@
     text-overflow: ellipsis;
   }
 
+  .card__url--multi { white-space: normal; overflow-wrap: anywhere; }
   .card__foot {
     display: flex;
     align-items: baseline;
@@ -543,6 +544,8 @@
 
      * name : any label you like, shown as the card title.
      * url  : the full URL that will be probed (http:// or https://).
+     * urls : optional, instead of url: several URLs merged into one card
+              (UP only if ALL of them answer; latency = slowest).
 
    To add a service, copy a line and change the two fields. Trailing commas are
    fine. Nothing else in this file needs to change.
@@ -551,10 +554,8 @@ const SERVICES = [
   // Core
   { name: "Jira",             url: "https://jira.onecell.ru" },
   { name: "Keycloak",         url: "https://keycloak.onecell.ru" },
-  { name: "ID (.ru)",         url: "https://id.onecell.ru" },
-  { name: "ID (.ai)",         url: "https://id.onecell.ai" },
-  { name: "Mattermost (.ru)", url: "https://mattermost.onecell.ru" },
-  { name: "Mattermost (.ai)", url: "https://mattermost.onecell.ai" },
+  { name: "ID",              urls: ["https://id.onecell.ru", "https://id.onecell.ai"] },
+  { name: "Mattermost",      urls: ["https://mattermost.onecell.ru", "https://mattermost.onecell.ai"] },
   // Important for work
   { name: "Meet",             url: "https://meet.onecell.ru" },
   { name: "Meet auth",        url: "https://auth-meet.onecell.ru" },
@@ -569,9 +570,7 @@ const SERVICES = [
   { name: "Drive",            url: "https://drive.onecell.ru" },
   { name: "Cloud (.ai)",      url: "https://cloud.onecell.ai" },
   { name: "Dashboard (.ai)",  url: "https://dashboard.onecell.ai" },
-  { name: "onecell.ru",       url: "https://onecell.ru" },
-  { name: "onecell.ai",       url: "https://onecell.ai" },
-  { name: "www.onecell.ai",   url: "https://www.onecell.ai" }
+  { name: "onecell (site)",   urls: ["https://onecell.ru", "https://onecell.ai", "https://www.onecell.ai"] }
 ];
 /* ========================================================================= */
 
@@ -584,7 +583,9 @@ const SERVICES = [
 
   // --- state ---------------------------------------------------------------
   var state = {
-    services: Array.isArray(SERVICES) ? SERVICES.slice() : [],
+    services: (Array.isArray(SERVICES) ? SERVICES : []).map(function (s) {
+      return { name: s.name, urls: Array.isArray(s.urls) ? s.urls : [s.url] };
+    }),
     results: [],
     running: false,
     lastCheckAt: null,
@@ -623,6 +624,8 @@ const SERVICES = [
     var m = Math.floor(s / 60);
     return "checked " + m + "m " + (s % 60) + "s ago";
   }
+
+  function hostOf(u) { return String(u).replace(/^[a-z]+:\/\//i, "").replace(/\/.*$/, ""); }
 
   // --- build the cards once (no DOM churn on later updates) ----------------
   function buildCards() {
@@ -683,8 +686,9 @@ const SERVICES = [
 
       var url = document.createElement("p");
       url.className = "card__url";
-      url.textContent = svc.url;
-      url.title = svc.url;
+      url.textContent = svc.urls.map(hostOf).join("  \u00b7  ");
+      url.title = svc.urls.join("\n");
+      if (svc.urls.length > 1) url.classList.add("card__url--multi");
 
       var foot = document.createElement("div");
       foot.className = "card__foot";
@@ -712,7 +716,7 @@ const SERVICES = [
       li.appendChild(foot);
       el.grid.appendChild(li);
 
-      cards.push({ root: li, badge: badge, icon: icon, label: label, latV: latV, ago: ago });
+      cards.push({ root: li, url: url, badge: badge, icon: icon, label: label, latV: latV, ago: ago });
     });
   }
 
@@ -729,6 +733,13 @@ const SERVICES = [
     c.label.textContent = LABELS[st];
     c.latV.textContent = (typeof r.latency === "number") ? r.latency + " ms" : "\u2014";
     c.ago.textContent = (st === "checking") ? "probing\u2026" : relative(r.checkedAt);
+    if (c.url && state.services[i].urls.length > 1) {
+      var svc = state.services[i];
+      c.url.textContent = svc.urls.map(function (u, k) {
+        var mark = (r.parts && r.parts[k]) ? (r.parts[k] === "up" ? " \u2713" : " \u2715") : "";
+        return hostOf(u) + mark;
+      }).join("  \u00b7  ");
+    }
   }
 
   function paintAgo(i) {
@@ -821,7 +832,19 @@ const SERVICES = [
   }
 
   // --- primary probe -------------------------------------------------------
-  function probe(service) {
+  function probe(svc) {
+    return Promise.all(svc.urls.map(function (u) { return probeOne({ url: u }); })).then(function (rs) {
+      var up = rs.every(function (r) { return r.status === "up"; });
+      return {
+        status: up ? "up" : "down",
+        latency: Math.max.apply(null, rs.map(function (r) { return r.latency || 0; })),
+        reason: rs.map(function (r) { return r.reason; }).join(","),
+        parts: rs.map(function (r) { return r.status; })
+      };
+    });
+  }
+
+  function probeOne(service) {
     var startedAt = now();
     var t = createTimeout();
 
@@ -897,7 +920,8 @@ const SERVICES = [
           status: (r.status === "up") ? "up" : "down",
           latency: (typeof r.latency === "number") ? r.latency : null,
           checkedAt: now(),
-          reason: r.reason || null
+          reason: r.reason || null,
+          parts: r.parts || null
         };
         paint(i);
       });
