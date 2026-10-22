@@ -1030,6 +1030,7 @@ const SERVICES = [
       paintLastCheck();
       paintSummary();
       recordStats();
+      runProbes();
       renderDiag();
 
       state.running = false;
@@ -1129,6 +1130,7 @@ const SERVICES = [
       Promise.all([doh(h, null), doh(h, "0.0.0.0/0")]).then(function (rs) {
         dns[h] = rs[0];
         dns[h].plain = rs[1];
+        if (state.lastCheckAt) runProbes();
         renderDiag();
       });
     });
@@ -1166,6 +1168,203 @@ const SERVICES = [
     })();
   }
 
+  // --- built-in probe (zero install): IP-literal reachability, DNS timing, RIPEstat, Globalping ---------
+  // All of it is best-effort: failures are silent and never touch the N / M counter.
+  var ipp = {};      // ip -> { status: "ok"|"fast"|"timeout"|"pending", ms, at }
+  var asn = {};      // ip -> { asn, holder, prefix } | { failed: true }
+  var gp = {};       // ip -> { status: "pending"|"done"|"failed", host, at, probes: [{country,city,asn,network,ok,code,ms}] }
+  var dnst = null;   // { onecell: {cold, warm}, control: {cold, warm}, at }
+  var dnstBusy = false;
+
+  // https://<ip>/ needs no DNS. A TypeError within ms means the address answered at TCP/TLS level (cert mismatch
+  // is expected); an abort at the timeout means packets are dropped. Based on fetch semantics, not on status.
+  function probeIp(ip) {
+    var c = ipp[ip];
+    if (c && (c.status === "pending" || now() - c.at < 300000)) return;
+    ipp[ip] = { status: "pending", ms: null, at: now() };
+    var t0 = now(), t = createTimeout();
+    fetch("https://" + ip + "/", { mode: "no-cors", cache: "no-store", redirect: "follow", signal: t.signal })
+      .then(function () { t.cancel(); ipp[ip] = { status: "ok", ms: elapsed(t0), at: now() }; })
+      .catch(function (e) {
+        t.cancel();
+        var to = e && (e.name === "AbortError" || e.name === "TimeoutError");
+        ipp[ip] = { status: to ? "timeout" : "fast", ms: elapsed(t0), at: now() };
+      })
+      .then(function () { renderDiag(); });
+  }
+
+  function nxProbe(zone) {
+    var label = "r-" + Math.random().toString(36).slice(2, 10) + "." + zone;
+    function one() {
+      var t0 = now(), t = createTimeout();
+      return fetch("https://" + label + "/", { mode: "no-cors", cache: "no-store", signal: t.signal })
+        .then(function () { t.cancel(); return elapsed(t0); }, function () { t.cancel(); return elapsed(t0); });
+    }
+    return one().then(function (cold) { return one().then(function (warm) { return { cold: cold, warm: warm }; }); });
+  }
+
+  function probeDnsTiming() {
+    if (dnstBusy || (dnst && now() - dnst.at < 300000)) return;
+    dnstBusy = true;
+    Promise.all([nxProbe("onecell.ru"), nxProbe("github.com")]).then(function (r) {
+      dnst = { onecell: r[0], control: r[1], at: now() };
+      dnstBusy = false; renderDiag();
+    }, function () { dnstBusy = false; });
+  }
+
+  function lookupAsn(ip) {
+    if (asn[ip]) return;
+    asn[ip] = { pending: true };
+    var t = createTimeout();
+    fetch("https://stat.ripe.net/data/prefix-overview/data.json?resource=" + encodeURIComponent(ip), { cache: "no-store", signal: t.signal })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        t.cancel();
+        var d = j && j.data, a = d && d.asns && d.asns[0];
+        asn[ip] = a ? { asn: "AS" + a.asn, holder: a.holder, prefix: d.resource } : { failed: true };
+        renderDiag();
+      })
+      .catch(function () { t.cancel(); asn[ip] = { failed: true }; });
+  }
+
+  function gpRun(ip, host) {
+    var c = gp[ip];
+    if (c && (c.status === "pending" || now() - c.at < 600000)) return;
+    var g = gp[ip] = { status: "pending", host: host, at: now(), probes: [] };
+    function fail() { g.status = "failed"; renderDiag(); }
+    fetch("https://api.globalping.io/v1/measurements", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "http", target: host,
+        locations: [{ country: "RU", limit: 3 }, { continent: "EU", limit: 2 }],
+        measurementOptions: { request: { method: "HEAD" }, protocol: "HTTPS" }
+      })
+    }).then(function (r) { if (!r.ok) throw new Error("http " + r.status); return r.json(); })
+      .then(function (j) {
+        var n = 0;
+        (function poll() {
+          fetch("https://api.globalping.io/v1/measurements/" + encodeURIComponent(j.id), { cache: "no-store" })
+            .then(function (r) { return r.json(); })
+            .then(function (m) {
+              if (m.status !== "finished" && ++n < 12) { setTimeout(poll, 1500); return; }
+              g.probes = (m.results || []).map(function (x) {
+                var res = x.result || {}, pr = x.probe || {};
+                return { country: pr.country, city: pr.city, asn: pr.asn, network: pr.network,
+                  ok: res.status === "finished" && typeof res.statusCode === "number",
+                  code: res.statusCode, ms: res.timings && res.timings.total };
+              });
+              g.status = "done"; renderDiag();
+            }).catch(fail);
+        })();
+      }).catch(fail);
+  }
+
+  function ipsOf(h) {
+    var d = dns[h], out = [];
+    if (!d) return out;
+    d.ips.concat(d.plain ? d.plain.ips : []).forEach(function (ip) { if (out.indexOf(ip) === -1) out.push(ip); });
+    return out;
+  }
+
+  function hostStatus(h) {
+    for (var i = 0; i < state.services.length; i++) {
+      var urls = state.services[i].urls, r = state.results[i];
+      for (var k = 0; k < urls.length; k++) {
+        if (hostOf(urls[k]) === h) {
+          if (!r || r.status === "checking") return "checking";
+          return r.parts ? r.parts[k] : r.status;
+        }
+      }
+    }
+    return "checking";
+  }
+
+  function runProbes() {
+    if (typeof fetch !== "function") return;
+    var seen = {}, failIp = {}, nFail = 0;
+    allHosts().forEach(function (h) {
+      var st = hostStatus(h);
+      ipsOf(h).forEach(function (ip) {
+        if (!seen[ip]) { seen[ip] = 1; probeIp(ip); lookupAsn(ip); }
+        if (st === "down" && dns[h].ips.indexOf(ip) !== -1 && !failIp[ip]) failIp[ip] = h;
+      });
+    });
+    if (Object.keys(seen).length) probeDnsTiming();
+    Object.keys(failIp).forEach(function (ip) { if (nFail++ < 3) gpRun(ip, failIp[ip]); });
+  }
+
+  function verdictRows() {
+    var rows = [];
+    if (!state.lastCheckAt) { rows.push(["Итог", "идёт первая проверка…", ""]); return rows; }
+    var cUp = controls.filter(function (c) { return c.status === "up"; }).length;
+    var hosts = allHosts(), badHosts = hosts.filter(function (h) { return hostStatus(h) === "down"; });
+    if (controls.length && cUp === 0) { rows.push(["Итог", "Нет интернета: ни один контрольный хост не отвечает. Результаты ниже недостоверны.", "bad"]); return rows; }
+    if (!badHosts.length) { rows.push(["Итог", "Всё доступно с вашего подключения.", "ok"]); return rows; }
+    var byIp = {};
+    badHosts.forEach(function (h) { var ip = (dns[h] && dns[h].ips[0]) || "?"; (byIp[ip] = byIp[ip] || []).push(h); });
+    Object.keys(byIp).forEach(function (ip) {
+      var names = byIp[ip].join(", "), p = ipp[ip], g = gp[ip], a = asn[ip];
+      var net = (a && a.asn ? " (" + a.asn + (a.holder ? " " + a.holder : "") + ")" : "");
+      var txt, cls = "bad";
+      if (ip === "?") { txt = names + ": адрес не получен (DNS не отвечает?). Проверьте DNS/VPN."; }
+      else if (!p || p.status === "pending") { txt = names + " → " + ip + net + ": проверяем адрес напрямую…"; cls = "warn"; }
+      else if (p.status === "timeout") txt = names + " → " + ip + net + ": по IP тоже нет ответа за " + (TIMEOUT_MS / 1000) + " с. Пакеты до этого адреса не доходят из вашей сети (фильтр/блокировка на пути).";
+      else txt = names + " → " + ip + net + ": адрес отвечает быстро (" + p.ms + " мс), но сервис не открылся. Возможно, ваш DNS-резолвер отдаёт другой адрес, либо фильтр режет по имени (SNI).";
+      if (g && g.status === "done" && g.probes.length) {
+        var ok = g.probes.filter(function (x) { return x.ok; }).length;
+        txt += " Снаружи (Globalping): " + ok + " из " + g.probes.length + " точек открывают" + (ok === g.probes.length && p && p.status === "timeout" ? " — значит, проблема в вашей сети/провайдере." : ".");
+      } else if (g && g.status === "pending") txt += " Запрашиваем внешний взгляд…";
+      rows.push(["Итог", txt, cls]);
+    });
+    return rows;
+  }
+
+  function probeSections(sec, row) {
+    sec("Зонд: прямой доступ по IP (без DNS)");
+    var ips = Object.keys(ipp);
+    if (!ips.length) row("Адреса", "ждём DNS…");
+    ips.forEach(function (ip) {
+      var p = ipp[ip], a = asn[ip];
+      var who = a && a.asn ? a.asn + " " + (a.holder || "") + (a.prefix ? ", " + a.prefix : "") : "";
+      var txt = p.status === "pending" ? "проверяем…" :
+        p.status === "timeout" ? "НЕТ ОТВЕТА за " + (TIMEOUT_MS / 1000) + " с (пакеты отбрасываются)" :
+        "отвечает за " + p.ms + " мс";
+      row(ip, txt + (who ? "  [" + who + "]" : ""), p.status === "timeout" ? "bad" : (p.status === "pending" ? "" : "ok"));
+    });
+    row("Как читать", "быстрый ответ = адрес достижим из вашей сети; таймаут = пакеты до него не доходят. HTTP-код недоступен (CORS).");
+
+    sec("Внешний взгляд (Globalping, только при недоступных сервисах)");
+    var gk = Object.keys(gp);
+    if (!gk.length) row("Измерения", "не запускались (все доступно или ждём DNS)");
+    gk.forEach(function (ip) {
+      var g = gp[ip];
+      if (g.status === "pending") { row(g.host + " (" + ip + ")", "измеряем…"); return; }
+      if (g.status === "failed") { row(g.host + " (" + ip + ")", "Globalping недоступен", "warn"); return; }
+      g.probes.forEach(function (x) {
+        row(g.host + " ← " + (x.country || "?") + " " + (x.city || ""),
+          (x.ok ? "открывается, HTTP " + x.code + ", " + Math.round(x.ms) + " мс" : "НЕ открывается") + " [AS" + x.asn + " " + (x.network || "") + "]",
+          x.ok ? "ok" : "bad");
+      });
+    });
+
+    sec("DNS-тайминг (оценка по несуществующему имени)");
+    if (!dnst) row("Замер", "идёт…");
+    else {
+      row("onecell.ru, первый / повторный", dnst.onecell.cold + " / " + dnst.onecell.warm + " мс");
+      row("github.com (контроль), первый / повторный", dnst.control.cold + " / " + dnst.control.warm + " мс");
+      var slow = dnst.onecell.cold > 1500 && dnst.onecell.cold > dnst.control.cold * 4;
+      row("Вывод", slow ? "резолвер медленно отвечает именно по onecell.ru" : "DNS-резолвер отвечает нормально", slow ? "warn" : "ok");
+    }
+
+    sec("Группы по IP");
+    var by = {};
+    allHosts().forEach(function (h) {
+      var ip = (dns[h] && dns[h].ips[0]) || "?";
+      (by[ip] = by[ip] || []).push(h + (hostStatus(h) === "down" ? " ✕" : (hostStatus(h) === "up" ? " ✓" : "")));
+    });
+    Object.keys(by).forEach(function (ip) { row(ip, by[ip].join(", ")); });
+  }
+
   function recordStats() {
     state.results.forEach(function (r, i) {
       var st = stats[i] || (stats[i] = { n: 0, up: 0, min: null, max: null, sum: 0, lat: 0 });
@@ -1192,6 +1391,9 @@ const SERVICES = [
     var out = [];
     function sec(title) { out.push({ h: title }); }
     function row(k, v, cls) { out.push({ k: k, v: (v === null || v === undefined || v === "") ? "\u2014" : String(v), cls: cls || "" }); }
+
+    sec("Итог (автоматический зонд)");
+    verdictRows().forEach(function (r) { row(r[0], r[1], r[2]); });
 
     sec("Сеть (ваше подключение)");
     if (net.status === "pending") row("Публичный IP / провайдер", "определяем\u2026");
@@ -1313,6 +1515,8 @@ const SERVICES = [
         row("Проверить локально", "dig +short " + diff[0] + "  и  dig +short +subnet=" + (ecsUsed || "<ваша /24>") + " " + diff[0] + " @8.8.8.8");
       }
     }
+
+    probeSections(sec, row);
 
     sec("Браузер / страница");
     var tz; try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (e) { tz = null; }
