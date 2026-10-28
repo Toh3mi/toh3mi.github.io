@@ -1527,11 +1527,12 @@ const SERVICES = [
       else row("Cloudflare DoH: " + extra.cf.host, extra.cf.ips.join("/") + (gIps.length ? (extra.cf.ips.some(function (x) { return gIps.indexOf(x) !== -1; }) ? "  (совпадает с Google)" : "  (отличается от Google: " + gIps.join("/") + "; Cloudflare не передаёт ECS, это нормально для гео-DNS)") : ""));
     } else row("Cloudflare DoH", "ждём…");
     var hip = net.status === "ok" && net.data ? net.data.ip : null;
+    var anyOk = STUN_SERVERS.some(function (sv) { var x = extra.stun && extra.stun[sv.name]; return x && x.status === "ok"; });
     STUN_SERVERS.forEach(function (sv) {
       var st = extra.stun && extra.stun[sv.name], lbl = "Публичный IP по UDP, STUN " + sv.name;
       if (!st) row(lbl, "замер…");
       else if (st.status === "ok") row(lbl, st.ip + " (" + st.ms + " мс)" + (hip ? (st.ip === hip ? ", совпадает с HTTPS" : " — отличается от HTTPS (" + hip + "): прокси / VPN / раздельный туннель") : ""), hip && st.ip !== hip ? "warn" : "ok");
-      else row(lbl, st.status === "unsupported" ? "WebRTC не поддерживается" : "нет ответа за 5 с (UDP/STUN заблокирован или отключён)", "warn");
+      else row(lbl, st.status === "unsupported" ? "WebRTC не поддерживается" : (anyOk ? "нет ответа за 5 с (этот сервер недоступен по UDP; другие отвечают, UDP в целом работает)" : "нет ответа за 5 с (UDP/STUN заблокирован или отключён)"), "warn");
     });
     if (extra.v6) row("IPv6 (Google 2001:4860:4860::8888)", extra.v6.status === "timeout" ? "нет ответа (IPv6 недоступен)" : "достижим (" + extra.v6.ms + " мс)", extra.v6.status === "timeout" ? "warn" : "ok");
     else row("IPv6", "замер…");
