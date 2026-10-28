@@ -1181,6 +1181,11 @@ const SERVICES = [
         t.cancel();
         echo = { status: "ok", dns: j.dns || null, edns: j.edns || null };
         renderDiag();
+        // what Route53 would answer to this resolver: ask dns.google "as if" from the resolver's own /24
+        var m = echo.dns && /^(\d+\.\d+\.\d+)\.\d+$/.exec(echo.dns.ip || "");
+        if (m) allHosts().forEach(function (h) {
+          doh(h, m[1] + ".0/24").then(function (r) { if (dns[h]) { dns[h].res = r; } else { dns[h] = dns[h] || { ips: [], status: "error", res: r }; } renderDiag(); });
+        });
       })
       .catch(function () { t.cancel(); echo = { status: "error" }; renderDiag(); });
   }
@@ -1752,7 +1757,7 @@ const SERVICES = [
         diff.length ? "warn" : "ok");
       diff.forEach(function (h) {
         var d = dns[h];
-        row(h, "Google с ECS " + d.ips.join("/") + "  |  Google без ECS " + d.plain.ips.join("/") + "  |  Cloudflare " + ((d.cf && d.cf.ips.length) ? d.cf.ips.join("/") : "—"), "warn");
+        row(h, "Google с ECS " + d.ips.join("/") + "  |  Google без ECS " + d.plain.ips.join("/") + "  |  Cloudflare " + ((d.cf && d.cf.ips.length) ? d.cf.ips.join("/") : "—") + (d.res ? "  |  по IP вашего резолвера " + (d.res.ips.length ? d.res.ips.join("/") : "—") : ""), "warn");
       });
       if (same) row("Одинаковый ответ в обоих случаях", same + " хост(ов)");
       var cfOnly = dh2.filter(function (h) { var d = dns[h]; return d && d.cf && d.cf.ips.length && d.ips.length && !d.ips.some(function (ip) { return d.cf.ips.indexOf(ip) !== -1; }); });
@@ -1760,6 +1765,9 @@ const SERVICES = [
       if (echo && echo.status === "ok" && echo.dns) {
         row("Ваш резолвер (выходной IP)", echo.dns.ip + (echo.dns.geo ? " — " + echo.dns.geo : ""));
         row("ECS, дошедший до DNS", echo.edns && echo.edns.ip ? echo.edns.ip + (echo.edns.geo ? " — " + echo.edns.geo : "") : "не передаётся (Route53 решает по IP резолвера выше)", echo.edns && echo.edns.ip ? "ok" : "warn");
+        var rh = dh2.filter(function (h) { return dns[h] && dns[h].res && dns[h].res.ips.length; });
+        var rBad = rh.filter(function (h) { return dns[h].res.ips.indexOf("65.109.43.138") !== -1; });
+        if (rh.length) row("Ожидаемый ответ вашего резолвера (по его IP)", rBad.length ? rBad.length + " из " + rh.length + " хостов получают Hetzner: " + rBad.slice(0, 6).join(", ") : "все " + rh.length + " хостов — российский адрес (как у вас по ECS)", rBad.length ? "warn" : "ok");
       } else if (echo) row("Ваш резолвер (выходной IP)", "не определён (edns.ip-api.com недоступен)", "warn");
       else row("Ваш резолвер (выходной IP)", "замер…");
       nx.forEach(function (h) { row(h, "NXDOMAIN — имя не существует", "bad"); });
@@ -1796,6 +1804,7 @@ const SERVICES = [
     if (!settled(ipp) || !settled(retry) || !settled(gp)) return false;
     if (!Object.keys(ipp).every(function (ip) { return asn[ip] !== undefined; })) return false;
     if (chanBusy || spBusy || dnstBusy) return false;
+    if (echo && echo.status === "ok" && echo.dns && !allHosts().every(function (h) { return dns[h] && dns[h].res; })) return false;
     if (!extraStarted || !echo || !extra.cf || !extra.v6 || !extra.stun) return false;
     return STUN_SERVERS.every(function (sv) { return extra.stun[sv.name]; });
   }
