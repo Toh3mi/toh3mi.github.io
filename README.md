@@ -23,7 +23,7 @@ const SERVICES = [
   { name: "Harbor",           url: "https://harbor.onecell.ru" },
   { name: "GitLab",            url: "https://gitlab.onecell.ru" },
   { name: "Terraform",        url: "https://terraform.onecell.ru" },
-  { name: "Notion",           url: "https://app.notion.com" },
+  { name: "Notion",           url: "https://app.notion.com", ext: true },
   { name: "Portal",           url: "https://portal.onecell.ru" },
   { name: "Drive",            url: "https://drive.onecell.ru" },
   { name: "Cloud (.ai)",      url: "https://cloud.onecell.ai" },

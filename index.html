@@ -662,7 +662,7 @@ const SERVICES = [
   { name: "Harbor",           url: "https://harbor.onecell.ru" },
   { name: "GitLab",           url: "https://gitlab.onecell.ru" },
   { name: "Terraform",        url: "https://terraform.onecell.ru" },
-  { name: "Notion",           url: "https://app.notion.com" },
+  { name: "Notion",           url: "https://app.notion.com", ext: true },   // third party: plain check only, no DNS/IP diagnostics
   { name: "Portal",           url: "https://portal.onecell.ru" },
   { name: "Drive",            url: "https://drive.onecell.ru" },
   { name: "Cloud (.ai)",      url: "https://cloud.onecell.ai" },
@@ -681,7 +681,7 @@ const SERVICES = [
   // --- state ---------------------------------------------------------------
   var state = {
     services: (Array.isArray(SERVICES) ? SERVICES : []).map(function (s) {
-      return { name: s.name, urls: Array.isArray(s.urls) ? s.urls : [s.url] };
+      return { name: s.name, ext: !!s.ext, urls: Array.isArray(s.urls) ? s.urls : [s.url] };
     }),
     results: [],
     running: false,
@@ -1097,6 +1097,7 @@ const SERVICES = [
   function allHosts() {
     var seen = {}, list = [];
     state.services.forEach(function (svc) {
+      if (svc.ext) return;   // third-party services stay out of DNS / IP / ECS diagnostics
       svc.urls.forEach(function (u) { var h = hostOf(u); if (!seen[h]) { seen[h] = 1; list.push(h); } });
     });
     return list;
