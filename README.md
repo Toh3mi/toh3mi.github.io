@@ -24,7 +24,6 @@ const SERVICES = [
   { name: "GitLab",            url: "https://gitlab.onecell.ru" },
   { name: "Docker registry",  url: "https://docker.onecell.ru" },
   { name: "Terraform",        url: "https://terraform.onecell.ru" },
-  { name: "Notion",           url: "https://notion.onecell.ru" },
   { name: "Portal",           url: "https://portal.onecell.ru" },
   { name: "Drive",            url: "https://drive.onecell.ru" },
   { name: "Cloud (.ai)",      url: "https://cloud.onecell.ai" },
