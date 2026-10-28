@@ -448,18 +448,35 @@
     color: var(--text-dim);
   }
   .diag__body { padding: 4px 18px 18px; }
-  .diag h3 {
-    margin: 16px 0 6px;
+  .diag__sec { border-top: 1px solid var(--border); }
+  .diag__sec:first-child { border-top: 0; }
+  .diag__sec > summary {
+    cursor: pointer;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
     font-family: var(--mono);
     font-size: 10.5px;
     letter-spacing: 0.18em;
     text-transform: uppercase;
     color: var(--accent-text);
+    list-style: none;
   }
+  .diag__sec > summary::-webkit-details-marker { display: none; }
+  .diag__sec > summary::before { content: "+"; width: 10px; color: var(--text-faint); }
+  .diag__sec[open] > summary::before { content: "\2212"; }
+  .diag__sec > summary.sev-ok::after,
+  .diag__sec > summary.sev-warn::after,
+  .diag__sec > summary.sev-bad::after { content: ""; width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .diag__sec > summary.sev-ok::after { background: var(--up); }
+  .diag__sec > summary.sev-warn::after { background: var(--check); }
+  .diag__sec > summary.sev-bad::after { background: var(--down); }
+  .diag__sec > dl { padding-bottom: 12px; }
   .diag dl {
     margin: 0;
     display: grid;
-    grid-template-columns: minmax(96px, max-content) 1fr;
+    grid-template-columns: minmax(96px, max-content) minmax(0, 1fr);
     gap: 4px 14px;
     font-size: 12px;
   }
@@ -542,6 +559,12 @@
     .badge { min-width: 0; padding: 4px 9px; }
     .card__v { min-width: 0; }
     .note { margin-top: 16px; padding: 12px 14px; }
+
+    /* diagnostics: label above value, otherwise a long label squeezes the value column to one character */
+    .diag__body { padding: 4px 14px 16px; }
+    .diag dl { grid-template-columns: minmax(0, 1fr); gap: 0; }
+    .diag dt { margin-top: 8px; }
+    .diag dd { margin-top: 1px; }
   }
 
   @media (max-width: 360px) {
@@ -1712,22 +1735,31 @@ const SERVICES = [
     return out;
   }
 
+  var secOpen = {};   // section title -> open flag, survives re-renders
   function renderDiag() {
     var root = document.getElementById("diagBody");
     var box = document.getElementById("diag");
     if (!root || !box || !box.open) return;   // render only while expanded
     root.textContent = "";
-    var dl = null;
+    var dl = null, sum = null, worst = 0, n = 0;
+    var rank = { ok: 1, warn: 2, bad: 3 };
+    function closeSec() { if (sum && worst) sum.className = "sev-" + (worst === 3 ? "bad" : worst === 2 ? "warn" : "ok"); }
     collectDiag().forEach(function (x) {
       if (x.h) {
-        var h = document.createElement("h3"); h.textContent = x.h; root.appendChild(h);
-        dl = document.createElement("dl"); root.appendChild(dl);
+        closeSec(); worst = 0;
+        var sec = document.createElement("details"); sec.className = "diag__sec";
+        sec.open = secOpen.hasOwnProperty(x.h) ? secOpen[x.h] : n < 2;   // first two sections open by default
+        sec.addEventListener("toggle", (function (key, d) { return function () { secOpen[key] = d.open; }; })(x.h, sec));
+        sum = document.createElement("summary"); sum.textContent = x.h; sec.appendChild(sum);
+        dl = document.createElement("dl"); sec.appendChild(dl); root.appendChild(sec); n++;
       } else {
         var dt = document.createElement("dt"); dt.textContent = x.k;
         var dd = document.createElement("dd"); dd.textContent = x.v; if (x.cls) dd.className = x.cls;
+        if (rank[x.cls] > worst) worst = rank[x.cls];
         dl.appendChild(dt); dl.appendChild(dd);
       }
     });
+    closeSec();
     var btn = document.createElement("button");
     btn.type = "button"; btn.className = "btn"; btn.textContent = "Скопировать диагностику";
     btn.addEventListener("click", copyReport);
