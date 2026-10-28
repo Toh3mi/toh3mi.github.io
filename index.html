@@ -884,17 +884,18 @@ const SERVICES = [
   // --- timeout plumbing ----------------------------------------------------
   // Primary: AbortController + setTimeout (broadest support).
   // Fallback: feature-detect AbortSignal.timeout() when AbortController is absent.
-  function createTimeout() {
+  function createTimeout(ms) {
+    var lim = ms || TIMEOUT_MS;
     if (typeof AbortController === "function") {
       var controller = new AbortController();
       var id = setTimeout(function () {
         try { controller.abort(); } catch (e) { /* ignore */ }
-      }, TIMEOUT_MS);
+      }, lim);
       return { signal: controller.signal, cancel: function () { clearTimeout(id); } };
     }
     if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
       try {
-        return { signal: AbortSignal.timeout(TIMEOUT_MS), cancel: function () {} };
+        return { signal: AbortSignal.timeout(lim), cancel: function () {} };
       } catch (e) { /* ignore */ }
     }
     return { signal: undefined, cancel: function () {} };
@@ -1190,8 +1191,78 @@ const SERVICES = [
         var to = e && (e.name === "AbortError" || e.name === "TimeoutError");
         ipp[ip] = { status: to ? "timeout" : "fast", ms: elapsed(t0), at: now() };
       })
+      .then(function () { renderDiag(); seqPar(); });
+  }
+
+  var NEIGH = { "90.156.156.15": ["90.156.156.50", "90.156.156.5"] };   // live third-party hosts in the same /24 (controls)
+  var retry = {};    // ip -> { host, status, ms, at }
+  var chan = null, chanBusy = false;   // { med, max, lost, mbps, at }
+  var sp = null, spBusy = false;       // { ip, seq, par, at }
+
+  function isTimeoutErr(e) { return !!e && (e.name === "AbortError" || e.name === "TimeoutError"); }
+
+  // second, longer attempt for a failing address: separates "dead" from "flaky / slow link"
+  function retryIp(ip, host) {
+    var c = retry[ip];
+    if (c && (c.status === "pending" || now() - c.at < 300000)) return;
+    retry[ip] = { host: host, status: "pending", ms: null, at: now() };
+    var t0 = now(), t = createTimeout(12000);
+    fetch("https://" + host + "/", { mode: "no-cors", cache: "no-store", redirect: "follow", signal: t.signal })
+      .then(function () { t.cancel(); retry[ip] = { host: host, status: "ok", ms: elapsed(t0), at: now() }; },
+            function (e) { t.cancel(); retry[ip] = { host: host, status: isTimeoutErr(e) ? "timeout" : "fast", ms: elapsed(t0), at: now() }; })
       .then(function () { renderDiag(); });
   }
+
+  function med(a) { var b = a.slice().sort(function (x, y) { return x - y; }); return b.length ? b[Math.floor(b.length / 2)] : null; }
+
+  // 5 sequential tiny requests (latency / loss) + one ~0.6 MB download from a CORS+TAO CDN (rough throughput)
+  function measureChannel() {
+    if (chanBusy || (chan && now() - chan.at < 300000)) return;
+    chanBusy = true;
+    var lat = [], lost = 0, i = 0;
+    function fin(mbps) {
+      chan = { med: med(lat), max: lat.length ? Math.max.apply(null, lat) : null, lost: lost, mbps: mbps, at: now() };
+      chanBusy = false; renderDiag();
+    }
+    (function next() {
+      if (i++ >= 5) {
+        var d0 = now(), dt = createTimeout(10000);
+        fetch("https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js?r=" + now(), { cache: "no-store", signal: dt.signal })
+          .then(function (r) { return r.arrayBuffer(); })
+          .then(function (b) { dt.cancel(); fin(Math.round(b.byteLength * 8 / 1e5 / Math.max(0.05, (now() - d0) / 1000)) / 10); })
+          .catch(function () { dt.cancel(); fin(null); });
+        return;
+      }
+      var t0 = now(), t = createTimeout(4000);
+      fetch("https://www.google.com/generate_204?r=" + now(), { mode: "no-cors", cache: "no-store", signal: t.signal })
+        .then(function () { t.cancel(); lat.push(elapsed(t0)); }, function () { t.cancel(); lost++; })
+        .then(next);
+    })();
+  }
+
+  // 4 requests one after another vs 4 at once to one reachable address: parallel much slower = per-connection throttling
+  function seqPar() {
+    if (spBusy || (sp && now() - sp.at < 300000)) return;
+    var ip = null;
+    Object.keys(ipp).forEach(function (k) { if (!ip && (ipp[k].status === "ok" || ipp[k].status === "fast") && !isNeighbor(k)) ip = k; });
+    if (!ip) return;
+    spBusy = true;
+    function one() {
+      var t0 = now(), t = createTimeout();
+      return fetch("https://" + ip + "/?r=" + Math.random(), { mode: "no-cors", cache: "no-store", signal: t.signal })
+        .then(function () { t.cancel(); return elapsed(t0); }, function () { t.cancel(); return elapsed(t0); });
+    }
+    var seq = [];
+    (function step(k) {
+      if (k >= 4) {
+        Promise.all([one(), one(), one(), one()]).then(function (par) { sp = { ip: ip, seq: med(seq), par: med(par), at: now() }; spBusy = false; renderDiag(); });
+        return;
+      }
+      one().then(function (v) { seq.push(v); step(k + 1); });
+    })(0);
+  }
+
+  function isNeighbor(ip) { return Object.keys(NEIGH).some(function (k) { return NEIGH[k].indexOf(ip) !== -1; }); }
 
   function nxProbe(zone) {
     var label = "r-" + Math.random().toString(36).slice(2, 10) + "." + zone;
@@ -1289,8 +1360,9 @@ const SERVICES = [
         if (st === "down" && dns[h].ips.indexOf(ip) !== -1 && !failIp[ip]) failIp[ip] = h;
       });
     });
-    if (Object.keys(seen).length) probeDnsTiming();
-    Object.keys(failIp).forEach(function (ip) { if (nFail++ < 3) gpRun(ip, failIp[ip]); });
+    if (Object.keys(seen).length) { probeDnsTiming(); measureChannel(); }
+    Object.keys(NEIGH).forEach(function (k) { if (failIp[k]) NEIGH[k].forEach(probeIp); });
+    Object.keys(failIp).forEach(function (ip) { if (nFail++ < 3) { gpRun(ip, failIp[ip]); retryIp(ip, failIp[ip]); } });
   }
 
   function verdictRows() {
@@ -1308,14 +1380,29 @@ const SERVICES = [
       var txt, cls = "bad";
       if (ip === "?") { txt = names + ": адрес не получен (DNS не отвечает?). Проверьте DNS/VPN."; }
       else if (!p || p.status === "pending") { txt = names + " → " + ip + net + ": проверяем адрес напрямую…"; cls = "warn"; }
-      else if (p.status === "timeout") txt = names + " → " + ip + net + ": по IP тоже нет ответа за " + (TIMEOUT_MS / 1000) + " с. Пакеты до этого адреса не доходят из вашей сети (фильтр/блокировка на пути).";
-      else txt = names + " → " + ip + net + ": адрес отвечает быстро (" + p.ms + " мс), но сервис не открылся. Возможно, ваш DNS-резолвер отдаёт другой адрес, либо фильтр режет по имени (SNI).";
+      else if (p.status === "timeout") {
+        txt = names + " \u2192 " + ip + net + ": по IP тоже нет ответа за " + (TIMEOUT_MS / 1000) + " с. Пакеты до этого адреса не доходят из вашей сети (фильтр/блокировка на пути).";
+        var nb = (NEIGH[ip] || []).filter(function (x) { return ipp[x] && ipp[x].status !== "pending"; });
+        if (nb.length) {
+          var nbOk = nb.filter(function (x) { return ipp[x].status !== "timeout"; }).length;
+          txt += nbOk ? " Соседние адреса той же подсети отвечают (" + nbOk + " из " + nb.length + ") \u2014 режут именно этот адрес." : " Соседи по подсети тоже молчат \u2014 похоже на блок всей подсети.";
+        }
+      } else {
+        var upOn = hosts.filter(function (h) { return hostStatus(h) === "up" && dns[h] && dns[h].ips[0] === ip; });
+        if (upOn.length) txt = names + " \u2192 " + ip + net + ": на этом же адресе открываются " + upOn.join(", ") + ", а эти нет \u2014 режут по имени (SNI) либо канал нестабилен.";
+        else txt = names + " \u2192 " + ip + net + ": адрес отвечает быстро (" + p.ms + " мс), но сервис не открылся. Возможно, ваш DNS-резолвер отдаёт другой адрес, либо фильтр режет по имени (SNI).";
+      }
+      var rt = retry[ip];
+      if (rt && rt.status === "ok") { txt += " Со 2-й попытки (12 с) открылся за " + rt.ms + " мс \u2014 нестабильно, не жёсткий блок."; cls = "warn"; }
+      else if (rt && rt.status !== "pending") txt += " Повтор (12 с) тоже без ответа \u2014 стабильно недоступен.";
       if (g && g.status === "done" && g.probes.length) {
         var ok = g.probes.filter(function (x) { return x.ok; }).length;
         txt += " Снаружи (Globalping): " + ok + " из " + g.probes.length + " точек открывают" + (ok === g.probes.length && p && p.status === "timeout" ? " — значит, проблема в вашей сети/провайдере." : ".");
       } else if (g && g.status === "pending") txt += " Запрашиваем внешний взгляд…";
       rows.push(["Итог", txt, cls]);
     });
+    if (chan && (chan.lost > 0 || (chan.med !== null && chan.med > 1500))) rows.push(["Итог", "Канал слабый (медиана " + chan.med + " мс, потерь " + chan.lost + " из 5): таймауты 6 с могут быть ложными.", "warn"]);
+    if (sp && sp.par > 3 * Math.max(sp.seq, 50) && sp.par > 800) rows.push(["Итог", "Параллельные запросы к одному адресу заметно медленнее последовательных (" + sp.par + " против " + sp.seq + " мс): похоже на ограничение числа соединений у оператора.", "warn"]);
     return rows;
   }
 
@@ -1329,9 +1416,21 @@ const SERVICES = [
       var txt = p.status === "pending" ? "проверяем…" :
         p.status === "timeout" ? "НЕТ ОТВЕТА за " + (TIMEOUT_MS / 1000) + " с (пакеты отбрасываются)" :
         "отвечает за " + p.ms + " мс";
-      row(ip, txt + (who ? "  [" + who + "]" : ""), p.status === "timeout" ? "bad" : (p.status === "pending" ? "" : "ok"));
+      row(ip + (isNeighbor(ip) ? " (сосед по подсети)" : ""), txt + (who ? "  [" + who + "]" : ""), p.status === "timeout" ? "bad" : (p.status === "pending" ? "" : "ok"));
     });
     row("Как читать", "быстрый ответ = адрес достижим из вашей сети; таймаут = пакеты до него не доходят. HTTP-код недоступен (CORS).");
+
+    sec("Качество канала и повтор");
+    if (!chan) row("Канал", "замер\u2026");
+    else {
+      row("Задержка (5 запросов), медиана / макс", (chan.med === null ? "\u2014" : chan.med + " / " + chan.max + " мс") + ", потерь " + chan.lost + " из 5", chan.lost || (chan.med > 1500) ? "warn" : "ok");
+      row("Скорость загрузки (оценка)", chan.mbps === null ? "не удалось (CDN недоступен?)" : chan.mbps + " Мбит/с", chan.mbps !== null && chan.mbps < 1 ? "warn" : "");
+    }
+    if (sp) row("Последовательно / параллельно (4 запроса к " + sp.ip + ")", sp.seq + " / " + sp.par + " мс (медиана)", sp.par > 3 * Math.max(sp.seq, 50) && sp.par > 800 ? "warn" : "ok");
+    Object.keys(retry).forEach(function (ip) {
+      var r = retry[ip];
+      row("Повтор " + r.host + " (12 с)", r.status === "pending" ? "идёт\u2026" : (r.status === "ok" ? "открылся за " + r.ms + " мс" : (r.status === "timeout" ? "снова нет ответа" : "быстрая ошибка за " + r.ms + " мс")), r.status === "ok" ? "warn" : (r.status === "pending" ? "" : "bad"));
+    });
 
     sec("Внешний взгляд (Globalping, только при недоступных сервисах)");
     var gk = Object.keys(gp);
