@@ -353,6 +353,7 @@
     overflow-wrap: anywhere;
   }
 
+  .card__tag { margin-left: 8px; font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-faint); font-weight: 400; vertical-align: middle; }
   .card__url {
     margin: 11px 0 15px;
     font-family: var(--mono);
@@ -685,7 +686,7 @@ const SERVICES = [
   { name: "Meet",             url: "https://meet.onecell.ru" },
   { name: "Meet auth",        url: "https://auth-meet.onecell.ru" },
   { name: "Harbor",           url: "https://harbor.onecell.ru" },
-  { name: "GitLab",           url: "https://gitlab.onecell.ru" },
+  { name: "GitLab",           url: "https://gitlab.onecell.ru", internal: true },   // closed from outside (public IP drops packets): checked, shown, but not counted in N / M and not in DNS/IP diagnostics
   { name: "Terraform",        url: "https://terraform.onecell.ru" },
   { name: "Notion",           url: "https://app.notion.com", ext: true },   // third party: plain check only, no DNS/IP diagnostics
   { name: "Portal",           url: "https://portal.onecell.ru" },
@@ -706,7 +707,7 @@ const SERVICES = [
   // --- state ---------------------------------------------------------------
   var state = {
     services: (Array.isArray(SERVICES) ? SERVICES : []).map(function (s) {
-      return { name: s.name, ext: !!s.ext, urls: Array.isArray(s.urls) ? s.urls : [s.url] };
+      return { name: s.name, ext: !!s.ext, internal: !!s.internal, urls: Array.isArray(s.urls) ? s.urls : [s.url] };
     }),
     results: [],
     running: false,
@@ -784,6 +785,7 @@ const SERVICES = [
       var name = document.createElement("h2");
       name.className = "card__name";
       name.textContent = svc.name;
+      if (svc.internal) { var tag = document.createElement("span"); tag.className = "card__tag"; tag.textContent = "внутренний"; tag.title = "Закрыт снаружи: не входит в счётчик N / M"; name.appendChild(tag); }
 
       id.appendChild(index);
       id.appendChild(name);
@@ -871,10 +873,15 @@ const SERVICES = [
     c.ago.textContent = relative(r.checkedAt);
   }
 
+  // internal services are probed and shown, but do not count towards N / M or the verdict
+  function isCounted(i) { return !state.services[i].internal; }
+  function countedTotal() { return state.services.filter(function (s) { return !s.internal; }).length; }
+
   function paintSummary() {
-    var total = state.services.length;
+    var total = countedTotal();
     var up = 0, down = 0, checking = 0;
-    state.results.forEach(function (r) {
+    state.results.forEach(function (r, i) {
+      if (!isCounted(i)) return;
       if (r.status === "up") up++;
       else if (r.status === "down") down++;
       else checking++;
@@ -1122,7 +1129,7 @@ const SERVICES = [
   function allHosts() {
     var seen = {}, list = [];
     state.services.forEach(function (svc) {
-      if (svc.ext) return;   // third-party services stay out of DNS / IP / ECS diagnostics
+      if (svc.ext || svc.internal) return;   // third-party / internal services stay out of DNS / IP / ECS diagnostics
       svc.urls.forEach(function (u) { var h = hostOf(u); if (!seen[h]) { seen[h] = 1; list.push(h); } });
     });
     return list;
@@ -1640,18 +1647,19 @@ const SERVICES = [
         row(c.name, (c.status === "up" ? "доступен" : "НЕДОСТУПЕН") + (typeof c.latency === "number" ? " (" + c.latency + " ms)" : ""), c.status === "up" ? "ok" : "bad");
       });
       var cUp = controls.filter(function (c) { return c.status === "up"; }).length;
-      var sDown = state.results.filter(function (r) { return r.status === "down"; }).length;
+      var sDown = state.results.filter(function (r, i) { return isCounted(i) && r.status === "down"; }).length;
       var verdict, vcls;
       if (cUp === 0) { verdict = "Похоже, нет интернета (ни один контрольный хост не отвечает) — результаты ниже недостоверны"; vcls = "bad"; }
       else if (sDown === 0) { verdict = "Всё хорошо: контрольные хосты и сервисы доступны"; vcls = "ok"; }
-      else if (sDown === state.results.length) { verdict = "Интернет работает, но ни один сервис OneCell не отвечает — блокировка на маршруте/у провайдера или общий сбой OneCell"; vcls = "bad"; }
+      else if (sDown === countedTotal()) { verdict = "Интернет работает, но ни один сервис OneCell не отвечает — блокировка на маршруте/у провайдера или общий сбой OneCell"; vcls = "bad"; }
       else { verdict = "Интернет работает; недоступна только часть сервисов OneCell — проблема на их стороне или на маршруте до них"; vcls = "warn"; }
       row("Вывод", verdict, vcls);
     }
 
     sec("Последняя проверка");
-    var total = state.services.length, up = 0, lats = [], bad = [], slow = null;
+    var total = countedTotal(), up = 0, lats = [], bad = [], slow = null, inner = [];
     state.results.forEach(function (r, i) {
+      if (!isCounted(i)) { inner.push(state.services[i].name + ": " + (r.status === "up" ? "отвечает" : r.status === "down" ? "нет ответа снаружи" : "проверяется")); return; }
       if (r.status === "up") up++;
       if (typeof r.latency === "number" && r.status === "up") {
         lats.push(r.latency);
@@ -1660,6 +1668,7 @@ const SERVICES = [
       if (r.status === "down") bad.push({ n: state.services[i].name, r: r, i: i });
     });
     row("Результат", up + " / " + total + " доступно", up === total ? "ok" : (up === 0 ? "bad" : "warn"));
+    if (inner.length) row("Внутренние (не в счётчике)", inner.join("; "));
     if (lats.length) {
       lats.sort(function (a, b) { return a - b; });
       var avg = Math.round(lats.reduce(function (a, b) { return a + b; }, 0) / lats.length);
@@ -1718,8 +1727,8 @@ const SERVICES = [
       nx.forEach(function (h) { row(h, "NXDOMAIN — имя не существует", "bad"); });
       if (fail) row("Ошибка DoH", fail + " хост(ов) (dns.google недоступен отсюда?)", "warn");
       if (diff.length) {
-        row("Что это значит", "Эти хосты резолвятся в разные серверы в зависимости от EDNS Client Subnet резолвера. Локальный резолвер, который отбрасывает ECS (или ходит через зарубежный upstream), получит адрес из колонки «без ECS».");
-        row("Проверить локально", "dig +short " + diff[0] + "  и  dig +short +subnet=" + (ecsUsed || "<ваша /24>") + " " + diff[0] + " @8.8.8.8");
+        row("Что это значит", "Ответ зависит от того, откуда резолвер обращается к DNS OneCell. «С ECS» — Google передал вашу подсеть, ответ как для вас. «Без ECS» — запрос без подсети: Route53 тогда смотрит на расположение выхода самого dns.google, а не вашего резолвера, поэтому колонка показывает худший случай (нерусский выход), а не ваш реальный адрес. Реальный ответ вашего резолвера — по команде ниже.");
+        row("Проверить локально", "dig +short " + diff[0] + " (ваш резолвер),  dig +short whoami.akamai.net (его выходной IP),  dig +short +subnet=" + (ecsUsed || "<ваша /24>") + " " + diff[0] + " @8.8.8.8");
       }
     }
 
@@ -1841,7 +1850,7 @@ const SERVICES = [
   // --- init ----------------------------------------------------------------
   function init() {
     buildCards();
-    el.totalCount.textContent = String(state.services.length);
+    el.totalCount.textContent = String(countedTotal());
     paintSummary();
     paintLastCheck();
 
