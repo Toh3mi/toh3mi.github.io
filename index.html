@@ -1229,7 +1229,7 @@ const SERVICES = [
         var d0 = now(), dt = createTimeout(10000);
         fetch("https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js?r=" + now(), { cache: "no-store", signal: dt.signal })
           .then(function (r) { return r.arrayBuffer(); })
-          .then(function (b) { dt.cancel(); fin(Math.round(b.byteLength * 8 / 1e5 / Math.max(0.05, (now() - d0) / 1000)) / 10); })
+          .then(function (b) { dt.cancel(); try { var en = performance.getEntriesByType("resource").filter(function (x) { return x.name.indexOf("three.min.js") !== -1; }).pop(); extra.proto = en && en.nextHopProtocol || null; } catch (e) { /* ignore */ } fin(Math.round(b.byteLength * 8 / 1e5 / Math.max(0.05, (now() - d0) / 1000)) / 10); })
           .catch(function () { dt.cancel(); fin(null); });
         return;
       }
@@ -1263,6 +1263,56 @@ const SERVICES = [
   }
 
   function isNeighbor(ip) { return Object.keys(NEIGH).some(function (k) { return NEIGH[k].indexOf(ip) !== -1; }); }
+
+  var extra = { cf: null, stun: null, v6: null, proto: null };   // second-stage probes, each runs once per page load
+  var extraStarted = false;
+
+  // Cloudflare DoH (CORS-enabled, sends no ECS): a third opinion on what the name resolves to
+  function probeCf(host) {
+    var t = createTimeout();
+    fetch("https://cloudflare-dns.com/dns-query?name=" + encodeURIComponent(host) + "&type=A", { headers: { Accept: "application/dns-json" }, cache: "no-store", signal: t.signal })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        t.cancel();
+        extra.cf = { host: host, ips: (j.Answer || []).filter(function (x) { return x.type === 1; }).map(function (x) { return x.data; }) };
+        renderDiag();
+      }).catch(function () { t.cancel(); extra.cf = { host: host, ips: null }; renderDiag(); });
+  }
+
+  // WebRTC STUN reports the public address as seen over UDP; a mismatch with the HTTPS-seen IP means proxy / VPN / split tunnel
+  function probeStun() {
+    if (typeof RTCPeerConnection !== "function") { extra.stun = { status: "unsupported" }; return; }
+    var done = false, pc;
+    function fin(v) { if (done) return; done = true; extra.stun = v; try { pc.close(); } catch (e) { /* ignore */ } renderDiag(); }
+    try {
+      pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+      pc.createDataChannel("p");
+      pc.onicecandidate = function (e) {
+        var m = e.candidate && /typ srflx/.test(e.candidate.candidate) && e.candidate.candidate.split(" ")[4];
+        if (m) fin({ status: "ok", ip: m });
+      };
+      pc.createOffer().then(function (o) { return pc.setLocalDescription(o); }).catch(function () { fin({ status: "failed" }); });
+      setTimeout(function () { fin({ status: "timeout" }); }, 5000);
+    } catch (e) { extra.stun = { status: "failed" }; }
+  }
+
+  // IPv6 literal (Google public DNS): reachability of the v6 path
+  function probeV6() {
+    var t0 = now(), t = createTimeout();
+    fetch("https://[2001:4860:4860::8888]/", { mode: "no-cors", cache: "no-store", signal: t.signal })
+      .then(function () { t.cancel(); extra.v6 = { status: "ok", ms: elapsed(t0) }; },
+            function (e) { t.cancel(); extra.v6 = { status: isTimeoutErr(e) ? "timeout" : "fast", ms: elapsed(t0) }; })
+      .then(function () { renderDiag(); });
+  }
+
+  function runExtra() {
+    if (extraStarted) return;
+    extraStarted = true;
+    var bad = allHosts().filter(function (h) { return hostStatus(h) === "down"; });
+    probeCf(bad[0] || allHosts()[0]);
+    probeStun();
+    probeV6();
+  }
 
   function nxProbe(zone) {
     var label = "r-" + Math.random().toString(36).slice(2, 10) + "." + zone;
@@ -1361,6 +1411,7 @@ const SERVICES = [
       });
     });
     if (Object.keys(seen).length) { probeDnsTiming(); measureChannel(); }
+    runExtra();
     Object.keys(NEIGH).forEach(function (k) { if (failIp[k]) NEIGH[k].forEach(probeIp); });
     Object.keys(failIp).forEach(function (ip) { if (nFail++ < 3) { gpRun(ip, failIp[ip]); retryIp(ip, failIp[ip]); } });
   }
@@ -1454,6 +1505,22 @@ const SERVICES = [
       var slow = dnst.onecell.cold > 1500 && dnst.onecell.cold > dnst.control.cold * 4;
       row("Вывод", slow ? "резолвер медленно отвечает именно по onecell.ru" : "DNS-резолвер отвечает нормально", slow ? "warn" : "ok");
     }
+
+    sec("Дополнительно: резолверы, UDP, IPv6, протокол");
+    if (extra.cf) {
+      var gIps = (dns[extra.cf.host] && dns[extra.cf.host].ips) || [];
+      if (extra.cf.ips === null) row("Cloudflare DoH: " + extra.cf.host, "недоступен отсюда", "warn");
+      else row("Cloudflare DoH: " + extra.cf.host, extra.cf.ips.join("/") + (gIps.length ? (extra.cf.ips.some(function (x) { return gIps.indexOf(x) !== -1; }) ? "  (совпадает с Google)" : "  (отличается от Google: " + gIps.join("/") + "; Cloudflare не передаёт ECS, это нормально для гео-DNS)") : ""));
+    } else row("Cloudflare DoH", "ждём…");
+    var st = extra.stun;
+    if (!st) row("Публичный IP по UDP (WebRTC)", "замер…");
+    else if (st.status === "ok") {
+      var hip = net.status === "ok" && net.data ? net.data.ip : null;
+      row("Публичный IP по UDP (WebRTC)", st.ip + (hip ? (st.ip === hip ? " (совпадает с HTTPS)" : " — отличается от HTTPS (" + hip + "): прокси / VPN / раздельный туннель") : ""), hip && st.ip !== hip ? "warn" : "ok");
+    } else row("Публичный IP по UDP (WebRTC)", st.status === "unsupported" ? "не поддерживается браузером" : "нет ответа (UDP/STUN заблокирован или отключён)", "warn");
+    if (extra.v6) row("IPv6 (Google 2001:4860:4860::8888)", extra.v6.status === "timeout" ? "нет ответа (IPv6 недоступен)" : "достижим (" + extra.v6.ms + " мс)", extra.v6.status === "timeout" ? "warn" : "ok");
+    else row("IPv6", "замер…");
+    row("Протокол до CDN (HTTP/2 или HTTP/3)", extra.proto || "не определён");
 
     sec("Группы по IP");
     var by = {};
