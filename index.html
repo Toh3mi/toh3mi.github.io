@@ -1280,10 +1280,16 @@ const SERVICES = [
   }
 
   // WebRTC STUN reports the public address as seen over UDP; a mismatch with the HTTPS-seen IP means proxy / VPN / split tunnel.
-  // Two independent servers, one connection each: NetBird (UDP 5555) and Google (UDP 19302).
+  // Independent servers, one connection each (UDP 5555 / 19302 / 3478): shows which UDP destinations are filtered.
   var STUN_SERVERS = [
-    { name: "NetBird",  url: "stun:stun.netbird.io:5555" },
-    { name: "Google",   url: "stun:stun.l.google.com:19302" }
+    { name: "NetBird",    url: "stun:stun.netbird.io:5555" },
+    { name: "Google",     url: "stun:stun.l.google.com:19302" },
+    { name: "Cloudflare", url: "stun:stun.cloudflare.com:3478" },
+    { name: "Яндекс",     url: "stun:stun.rtc.yandex.net:3478" },
+    { name: "Sipnet",     url: "stun:stun.sipnet.ru:3478" },
+    { name: "Nextcloud",  url: "stun:stun.nextcloud.com:3478" },
+    { name: "Twilio",     url: "stun:global.stun.twilio.com:3478" },
+    { name: "1&1",        url: "stun:stun.1und1.de:3478" }
   ];
   function probeStun() {
     extra.stun = {};
@@ -1341,19 +1347,19 @@ const SERVICES = [
     }, function () { dnstBusy = false; });
   }
 
-  function lookupAsn(ip) {
-    if (asn[ip]) return;
+  function lookupAsn(ip, retried) {
+    if (asn[ip] && !(retried === true && asn[ip].failed)) return;
     asn[ip] = { pending: true };
+    function bad() { asn[ip] = { failed: true }; if (!retried) setTimeout(function () { lookupAsn(ip, true); }, 5000); }
     var t = createTimeout();
     fetch("https://stat.ripe.net/data/prefix-overview/data.json?resource=" + encodeURIComponent(ip), { cache: "no-store", signal: t.signal })
       .then(function (r) { return r.json(); })
       .then(function (j) {
         t.cancel();
         var d = j && j.data, a = d && d.asns && d.asns[0];
-        asn[ip] = a ? { asn: "AS" + a.asn, holder: a.holder, prefix: d.resource } : { failed: true };
-        renderDiag();
+        if (a) { asn[ip] = { asn: "AS" + a.asn, holder: a.holder, prefix: d.resource }; renderDiag(); } else bad();
       })
-      .catch(function () { t.cancel(); asn[ip] = { failed: true }; });
+      .catch(function () { t.cancel(); bad(); });
   }
 
   function gpRun(ip, host) {
