@@ -1278,21 +1278,29 @@ const SERVICES = [
       }).catch(function () { t.cancel(); extra.cf = { host: host, ips: null }; renderDiag(); });
   }
 
-  // WebRTC STUN reports the public address as seen over UDP; a mismatch with the HTTPS-seen IP means proxy / VPN / split tunnel
+  // WebRTC STUN reports the public address as seen over UDP; a mismatch with the HTTPS-seen IP means proxy / VPN / split tunnel.
+  // Two independent servers, one connection each: NetBird (UDP 5555) and Google (UDP 19302).
+  var STUN_SERVERS = [
+    { name: "NetBird",  url: "stun:stun.netbird.io:5555" },
+    { name: "Google",   url: "stun:stun.l.google.com:19302" }
+  ];
   function probeStun() {
-    if (typeof RTCPeerConnection !== "function") { extra.stun = { status: "unsupported" }; return; }
-    var done = false, pc;
-    function fin(v) { if (done) return; done = true; extra.stun = v; try { pc.close(); } catch (e) { /* ignore */ } renderDiag(); }
-    try {
-      pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
-      pc.createDataChannel("p");
-      pc.onicecandidate = function (e) {
-        var m = e.candidate && /typ srflx/.test(e.candidate.candidate) && e.candidate.candidate.split(" ")[4];
-        if (m) fin({ status: "ok", ip: m });
-      };
-      pc.createOffer().then(function (o) { return pc.setLocalDescription(o); }).catch(function () { fin({ status: "failed" }); });
-      setTimeout(function () { fin({ status: "timeout" }); }, 5000);
-    } catch (e) { extra.stun = { status: "failed" }; }
+    extra.stun = {};
+    if (typeof RTCPeerConnection !== "function") { STUN_SERVERS.forEach(function (sv) { extra.stun[sv.name] = { status: "unsupported" }; }); return; }
+    STUN_SERVERS.forEach(function (sv) {
+      var done = false, pc, t0 = now();
+      function fin(v) { if (done) return; done = true; v.ms = elapsed(t0); extra.stun[sv.name] = v; try { pc.close(); } catch (e) { /* ignore */ } renderDiag(); }
+      try {
+        pc = new RTCPeerConnection({ iceServers: [{ urls: sv.url }] });
+        pc.createDataChannel("p");
+        pc.onicecandidate = function (e) {
+          var c = e.candidate && e.candidate.candidate;
+          if (c && / typ srflx/.test(c)) fin({ status: "ok", ip: c.split(" ")[4] });
+        };
+        pc.createOffer().then(function (o) { return pc.setLocalDescription(o); }).catch(function () { fin({ status: "failed" }); });
+        setTimeout(function () { fin({ status: "timeout" }); }, 5000);
+      } catch (e) { extra.stun[sv.name] = { status: "failed" }; }
+    });
   }
 
   // IPv6 literal (Google public DNS): reachability of the v6 path
@@ -1511,12 +1519,13 @@ const SERVICES = [
       if (extra.cf.ips === null) row("Cloudflare DoH: " + extra.cf.host, "недоступен отсюда", "warn");
       else row("Cloudflare DoH: " + extra.cf.host, extra.cf.ips.join("/") + (gIps.length ? (extra.cf.ips.some(function (x) { return gIps.indexOf(x) !== -1; }) ? "  (совпадает с Google)" : "  (отличается от Google: " + gIps.join("/") + "; Cloudflare не передаёт ECS, это нормально для гео-DNS)") : ""));
     } else row("Cloudflare DoH", "ждём…");
-    var st = extra.stun;
-    if (!st) row("Публичный IP по UDP (WebRTC)", "замер…");
-    else if (st.status === "ok") {
-      var hip = net.status === "ok" && net.data ? net.data.ip : null;
-      row("Публичный IP по UDP (WebRTC)", st.ip + (hip ? (st.ip === hip ? " (совпадает с HTTPS)" : " — отличается от HTTPS (" + hip + "): прокси / VPN / раздельный туннель") : ""), hip && st.ip !== hip ? "warn" : "ok");
-    } else row("Публичный IP по UDP (WebRTC)", st.status === "unsupported" ? "не поддерживается браузером" : "нет ответа (UDP/STUN заблокирован или отключён)", "warn");
+    var hip = net.status === "ok" && net.data ? net.data.ip : null;
+    STUN_SERVERS.forEach(function (sv) {
+      var st = extra.stun && extra.stun[sv.name], lbl = "Публичный IP по UDP, STUN " + sv.name;
+      if (!st) row(lbl, "замер…");
+      else if (st.status === "ok") row(lbl, st.ip + " (" + st.ms + " мс)" + (hip ? (st.ip === hip ? ", совпадает с HTTPS" : " — отличается от HTTPS (" + hip + "): прокси / VPN / раздельный туннель") : ""), hip && st.ip !== hip ? "warn" : "ok");
+      else row(lbl, st.status === "unsupported" ? "WebRTC не поддерживается" : "нет ответа за 5 с (UDP/STUN заблокирован или отключён)", "warn");
+    });
     if (extra.v6) row("IPv6 (Google 2001:4860:4860::8888)", extra.v6.status === "timeout" ? "нет ответа (IPv6 недоступен)" : "достижим (" + extra.v6.ms + " мс)", extra.v6.status === "timeout" ? "warn" : "ok");
     else row("IPv6", "замер…");
     row("Протокол до CDN (HTTP/2 или HTTP/3)", extra.proto || "не определён");
