@@ -1794,7 +1794,7 @@ const SERVICES = [
 
   var secOpen = {};   // section title -> open flag, survives re-renders
   // the report is copyable only when every test has finished (or after a hard cap, so a stuck probe cannot hide it forever)
-  var diagStart = now(), DIAG_CAP = 120000;
+  var diagStart = now(), DIAG_CAP = 45000;
   function testsDone() {
     if (!state.lastCheckAt) return false;
     if (!state.results.every(function (r) { return r && r.status !== "checking"; })) return false;
@@ -1808,11 +1808,17 @@ const SERVICES = [
     if (!extraStarted || !echo || !extra.cf || !extra.v6 || !extra.stun) return false;
     return STUN_SERVERS.every(function (sv) { return extra.stun[sv.name]; });
   }
-  function copyReady() { return testsDone() || now() - diagStart > DIAG_CAP; }
+  // latched: once the report was ready it stays ready (the 30 s re-check flips services to "checking" again)
+  var readyFull = false, readyCap = false;
+  function copyReady() {
+    if (!readyFull && testsDone()) readyFull = true;
+    if (!readyCap && now() - diagStart > DIAG_CAP) readyCap = true;
+    return readyFull || readyCap;
+  }
   function syncCopy() {
     var b = document.getElementById("copyTop");
     if (!b) return;
-    var ok = copyReady(), full = testsDone();
+    var ok = copyReady(), full = readyFull;
     if (b.hidden === ok) b.hidden = !ok;
     var l = b.querySelector(".btn__label");
     if (l && !b.classList.contains("is-ok") && !b.classList.contains("is-bad")) l.textContent = full ? "Скопировать диагностику" : "Скопировать (тесты не завершены)";
